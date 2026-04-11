@@ -152,12 +152,31 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(blocker, "google api key is missing")
 
     def test_collect_opencode_text_includes_json_error_event_messages(self):
-        payload = b'{"type":"error","error":{"message":"Google Generative AI API key is missing","data":{"providerID":"google"}}}\n'
+        payload = b'{"type":"error","error":{"name":"ProviderAuthError","data":{"providerID":"google","message":"Google Generative AI API key is missing"}}}\n'
 
         combined = worker.collect_opencode_text(payload, b"")
 
         self.assertIn("google", combined.lower())
         self.assertIn("api key is missing", combined.lower())
+
+    def test_build_clean_opencode_env_removes_nested_opencode_variables(self):
+        with patch.dict(
+            os.environ,
+            {
+                "OPENCODE": "1",
+                "OPENCODE_PID": "123",
+                "OPENCODE_ANTIGRAVITY_DEBUG": "1",
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": os.environ.get("HOME", ""),
+            },
+            clear=False,
+        ):
+            env = worker.build_clean_opencode_env()
+
+        self.assertNotIn("OPENCODE", env)
+        self.assertNotIn("OPENCODE_PID", env)
+        self.assertNotIn("OPENCODE_ANTIGRAVITY_DEBUG", env)
+        self.assertIn("PATH", env)
 
 
 class HeyPiggyWorkerClickPipelineTests(unittest.IsolatedAsyncioTestCase):

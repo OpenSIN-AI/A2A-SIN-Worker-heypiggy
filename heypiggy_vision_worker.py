@@ -334,11 +334,31 @@ def collect_opencode_text(stdout: bytes, stderr: bytes = b"") -> str:
             full_text += event.get("part", {}).get("text", "")
         elif event.get("type") == "error":
             error_data = event.get("error", {}) or {}
-            error_message = error_data.get("message", "")
-            provider_id = error_data.get("data", {}).get("providerID", "")
+            error_payload = error_data.get("data", {}) or {}
+            error_message = error_data.get("message", "") or error_payload.get(
+                "message", ""
+            )
+            provider_id = error_payload.get("providerID", "")
             if provider_id or error_message:
                 full_text += f" {provider_id} {error_message}".strip()
     return full_text.strip()
+
+
+def build_clean_opencode_env() -> dict:
+    """
+    Entfernt verschachtelte OpenCode-Session-Variablen aus der Child-Umgebung.
+    WHY: Der Worker ruft `opencode run` als untergeordneten Prozess auf. Wenn
+         dabei `OPENCODE=1`, `OPENCODE_PID` oder andere OpenCode-Laufzeitvariablen
+         vererbt werden, verhält sich der Child-Prozess wie eine verschachtelte
+         Session statt wie ein sauberer One-Shot-CLI-Call.
+    CONSEQUENCES: Vision-Aufrufe laufen isoliert und werden nicht vom aktuell
+                  laufenden Eltern-Agenten-Kontext kontaminiert.
+    """
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("OPENCODE")
+    }
 
 
 def detect_vision_auth_failure(raw_text: str) -> str | None:
@@ -421,10 +441,12 @@ async def run_vision_model(
             pass
 
     try:
+        child_env = build_clean_opencode_env()
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=child_env,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
