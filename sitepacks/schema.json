@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SIN Sitepack Schema",
+  "description": "Validates versioned site-specific selector packs for browser automation workers.",
+  "type": "object",
+  "required": ["site", "version", "selectors", "flows", "page_signatures"],
+  "additionalProperties": false,
+  "properties": {
+    "site": {
+      "type": "string",
+      "description": "Domain of the target site (e.g. heypiggy.com)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semver version of this sitepack"
+    },
+    "selectors": {
+      "type": "object",
+      "description": "Named CSS selectors for interactive elements",
+      "additionalProperties": { "type": "string" },
+      "minProperties": 1
+    },
+    "flows": {
+      "type": "object",
+      "description": "Named step sequences for multi-action workflows",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "page_signatures": {
+      "type": "object",
+      "description": "Named lists of selectors that identify a page type",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}
