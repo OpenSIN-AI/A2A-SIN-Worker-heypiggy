@@ -364,6 +364,7 @@ async def run_vision_model(
         VISION_MODEL,
         "--format",
         "json",
+        "--verbose",
     ]
     # DEBUG: For step 1, write the exact command to a file for manual reproduction
     if step_num == 1:
@@ -2132,7 +2133,7 @@ async def main():
 
         # THROTTLE: Vor Vision-Calls länger warten um Rate-Limit zu vermeiden
         # WHY: Antigravity hat Rate-Limits; zu schnelle Calls führen zu leeren Antworten.
-        await human_delay(3.0, 6.0)
+        await human_delay(5.0, 10.0)
 
         # ---- VISION CHECK ----
         decision = await ask_vision(
