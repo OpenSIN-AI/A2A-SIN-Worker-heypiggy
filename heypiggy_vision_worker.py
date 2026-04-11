@@ -49,6 +49,13 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+# --- State Machine ---
+from agent_state_machine import (
+    AgentState, StepContext, step_context_advance,
+    fail_safe, escalate, IllegalTransitionError
+)
+
+
 # ============================================================================
 # USER PROFIL — Jeremy Schulze
 # WHY: Der Worker muss Profil-Fragen (Region, Wohnort, Geschlecht, Name etc.)
@@ -2084,6 +2091,9 @@ async def run_click_action(
 
 
 async def main():
+    ctx = StepContext(state=AgentState.INIT)
+    step_context_advance(ctx, AgentState.PREFLIGHT, "Initializing worker")
+
     audit(
         "start",
         message="A2A-SIN-Worker-HeyPiggy Vision Gate v2.0",
@@ -2111,6 +2121,7 @@ async def main():
 
     # 3. VISION GATE CONTROLLER INITIALISIEREN
     gate = VisionGateController()
+    step_context_advance(ctx, AgentState.ACQUIRE_SESSION, "Starting acquisition")
 
     # 4. INITIALE NAVIGATION
     action_desc = "Navigiere zu HeyPiggy Dashboard"
@@ -2158,6 +2169,11 @@ async def main():
 
     # 5. VISION GATE LOOP — Das Herzstück
     while gate.should_continue():
+        ctx.no_progress_counter = gate.no_progress_count
+        ctx.step_index = gate.total_steps
+        if not gate.should_continue():
+            fail_safe(ctx, "Gate should not continue (max steps or retries reached)")
+            break
         # ---- Bridge-Health-Check vor JEDER Iteration ----
         if not await check_bridge_alive():
             audit("stop", reason="Bridge nicht erreichbar, Abbruch")
@@ -2177,6 +2193,7 @@ async def main():
         await human_delay(5.0, 10.0)
 
         # ---- VISION CHECK ----
+        step_context_advance(ctx, AgentState.ASSESS_PAGE, "Assessing current page visual state")
         decision = await ask_vision(
             img_path, action_desc, expected, gate.total_steps + 1
         )
@@ -2189,6 +2206,28 @@ async def main():
         progress = decision.get("progress", False)
 
         # Schritt aufzeichnen
+                # Map page_state to actual FSM states where appropriate
+        try:
+            if page_state == "login":
+                step_context_advance(ctx, AgentState.AUTHENTICATE, "Login page detected")
+            elif page_state == "onboarding":
+                step_context_advance(ctx, AgentState.ONBOARD, "Onboarding page detected")
+            elif page_state == "dashboard":
+                step_context_advance(ctx, AgentState.DISCOVER_WORK, "Dashboard detected")
+            elif page_state == "survey":
+                step_context_advance(ctx, AgentState.SELECT_TASK, "Survey selection detected")
+            elif page_state == "survey_active":
+                if ctx.state == AgentState.SELECT_TASK:
+                    step_context_advance(ctx, AgentState.ENTER_TASK, "Entering task")
+                step_context_advance(ctx, AgentState.EXECUTE_TASK_LOOP, "Executing task loop")
+            elif page_state == "survey_done":
+                step_context_advance(ctx, AgentState.VALIDATE_OUTCOME, "Survey completed")
+                step_context_advance(ctx, AgentState.RECORD_RESULT, "Recording result")
+            elif verdict == "STOP":
+                pass # handled below
+        except IllegalTransitionError as e:
+            audit("warning", message=f"State transition ignored: {e}")
+            
         gate.record_step(verdict, img_hash, page_state)
 
         print(f"\n{'=' * 60}")
@@ -2226,6 +2265,10 @@ async def main():
                 total_steps=gate.total_steps,
             )
             await save_session("completed")
+            try:
+                step_context_advance(ctx, AgentState.COMPLETE, "Task marked completed by vision")
+            except IllegalTransitionError:
+                pass
             break
 
         # ---- SURVEY DONE — Bestätigungsseite erkannt ----
