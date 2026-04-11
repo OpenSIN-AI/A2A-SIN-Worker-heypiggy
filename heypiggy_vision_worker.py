@@ -2091,7 +2091,15 @@ async def run_click_action(
 
 
 async def main():
-    ctx = StepContext(state=AgentState.INIT)
+    # WHY: The FSM context is created before any real work begins so the worker
+    # can track phase, loop progress, page fingerprints, and recovery metadata
+    # from the very first step onward.
+    ctx = StepContext(
+        state=AgentState.INIT,
+        step_index=0,
+        max_steps=MAX_STEPS,
+        task_url="https://www.heypiggy.com/login",
+    )
     step_context_advance(ctx, AgentState.PREFLIGHT, "Initializing worker")
 
     audit(
@@ -2169,11 +2177,15 @@ async def main():
 
     # 5. VISION GATE LOOP — Das Herzstück
     while gate.should_continue():
+        # WHY: The gate owns the raw loop counters, but the FSM context must mirror
+        # them so fail-safe checkpoints and structured state logs contain the latest
+        # safety-relevant execution metadata.
         ctx.no_progress_counter = gate.no_progress_count
         ctx.step_index = gate.total_steps
+        if ctx.no_progress_counter >= MAX_NO_PROGRESS:
+            fail_safe(ctx, "Gate detected no progress threshold exhaustion")
         if not gate.should_continue():
             fail_safe(ctx, "Gate should not continue (max steps or retries reached)")
-            break
         # ---- Bridge-Health-Check vor JEDER Iteration ----
         if not await check_bridge_alive():
             audit("stop", reason="Bridge nicht erreichbar, Abbruch")
@@ -2183,6 +2195,9 @@ async def main():
         img_path, img_hash = await take_screenshot(
             gate.total_steps + 1, label=action_desc[:20]
         )
+        # WHY: The latest screenshot hash is the canonical page fingerprint the FSM
+        # can persist into checkpoints for progress and recovery analysis.
+        ctx.last_page_fingerprint = img_hash or ""
         if not img_path:
             gate.record_step("RETRY", None)
             await human_delay(2.0, 4.0)
@@ -2346,6 +2361,9 @@ async def main():
             # Navigation — IMMER mit exaktem tabId, KEIN Fallback ohne tabId
             elif next_action == "navigate":
                 url = next_params.get("url", "")
+                # WHY: The FSM context should remember the latest task/dashboard URL so
+                # checkpoint files can explain exactly where the worker was headed.
+                ctx.task_url = url or ctx.task_url
                 await execute_bridge("navigate", {"url": url, **_tab_params()})
                 await save_session(f"nav_{gate.total_steps}")
 
