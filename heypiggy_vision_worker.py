@@ -145,7 +145,7 @@ MAX_RETRIES = 5
 #   Außerdem wird no_progress_count bei page_state='survey_active' NICHT hochgezählt.
 MAX_NO_PROGRESS = 15
 MAX_CLICK_ESCALATIONS = 5  # 5 Klick-Methoden bevor aufgegeben wird
-VISION_MODEL = "google/antigravity-gemini-3.1-pro"
+VISION_MODEL = "google/antigravity-gemini-3-flash"
 CLICK_ACTIONS = (
     "click_element",
     "click_ref",
@@ -382,7 +382,21 @@ async def run_vision_model(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except Exception as e:
+            try:
+                process.kill()
+            except:
+                pass
+            return {
+                "ok": False,
+                "auth_failure": False,
+                "error": f"Vision timeout or error: {e}",
+                "stdout_text": "",
+                "stderr_text": "",
+                "returncode": -1,
+            }
         full_text = collect_opencode_text(stdout, stderr)
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
         combined = "\n".join(part for part in [full_text, stderr_text] if part)
