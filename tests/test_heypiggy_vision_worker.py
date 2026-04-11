@@ -31,17 +31,21 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
         execute_bridge = AsyncMock()
         check_bridge_alive = AsyncMock(return_value=True)
         run_vision_model = AsyncMock(
-            side_effect=AssertionError("vision probe must not run when credentials are missing")
+            side_effect=AssertionError(
+                "vision probe must not run when credentials are missing"
+            )
         )
 
-        with patch.dict(
-            os.environ,
-            {"HEYPIGGY_EMAIL": "", "HEYPIGGY_PASSWORD": ""},
-            clear=False,
-        ), patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)), patch.object(
-            worker, "check_bridge_alive", check_bridge_alive
-        ), patch.object(worker, "run_vision_model", run_vision_model), patch.object(
-            worker, "execute_bridge", execute_bridge
+        with (
+            patch.dict(
+                os.environ,
+                {"HEYPIGGY_EMAIL": "", "HEYPIGGY_PASSWORD": ""},
+                clear=False,
+            ),
+            patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)),
+            patch.object(worker, "check_bridge_alive", check_bridge_alive),
+            patch.object(worker, "run_vision_model", run_vision_model),
+            patch.object(worker, "execute_bridge", execute_bridge),
         ):
             await worker.main()
 
@@ -51,26 +55,30 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_stops_before_browser_mutation_when_vision_auth_fails(self):
         execute_bridge = AsyncMock()
 
-        with patch.dict(
-            os.environ,
-            {
-                "HEYPIGGY_EMAIL": "ops@example.com",
-                "HEYPIGGY_PASSWORD": "secret",
-            },
-            clear=False,
-        ), patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)), patch.object(
-            worker, "check_bridge_alive", AsyncMock(return_value=True)
-        ), patch.object(
-            worker,
-            "run_vision_model",
-            AsyncMock(
-                return_value={
-                    "ok": False,
-                    "auth_failure": True,
-                    "error": "401 invalid authentication credentials",
-                }
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HEYPIGGY_EMAIL": "ops@example.com",
+                    "HEYPIGGY_PASSWORD": "secret",
+                },
+                clear=False,
             ),
-        ), patch.object(worker, "execute_bridge", execute_bridge):
+            patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)),
+            patch.object(worker, "check_bridge_alive", AsyncMock(return_value=True)),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(
+                    return_value={
+                        "ok": False,
+                        "auth_failure": True,
+                        "error": "401 invalid authentication credentials",
+                    }
+                ),
+            ),
+            patch.object(worker, "execute_bridge", execute_bridge),
+        ):
             await worker.main()
 
         execute_bridge.assert_not_awaited()
@@ -78,43 +86,52 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_stops_before_browser_mutation_when_vision_health_fails(self):
         execute_bridge = AsyncMock()
 
-        with patch.dict(
-            os.environ,
-            {
-                "HEYPIGGY_EMAIL": "ops@example.com",
-                "HEYPIGGY_PASSWORD": "secret",
-            },
-            clear=False,
-        ), patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)), patch.object(
-            worker, "check_bridge_alive", AsyncMock(return_value=True)
-        ), patch.object(
-            worker,
-            "run_vision_model",
-            AsyncMock(
-                return_value={
-                    "ok": False,
-                    "auth_failure": True,
-                    "error": "vision health check failed",
-                }
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HEYPIGGY_EMAIL": "ops@example.com",
+                    "HEYPIGGY_PASSWORD": "secret",
+                },
+                clear=False,
             ),
-        ), patch.object(worker, "execute_bridge", execute_bridge):
+            patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)),
+            patch.object(worker, "check_bridge_alive", AsyncMock(return_value=True)),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(
+                    return_value={
+                        "ok": False,
+                        "auth_failure": True,
+                        "error": "vision health check failed",
+                    }
+                ),
+            ),
+            patch.object(worker, "execute_bridge", execute_bridge),
+        ):
             await worker.main()
 
         execute_bridge.assert_not_awaited()
 
     async def test_ask_vision_turns_auth_failure_into_stop(self):
-        with patch.object(worker, "dom_prescan", AsyncMock(return_value="DOM")), patch.object(
-            worker,
-            "run_vision_model",
-            AsyncMock(
-                return_value={
-                    "ok": False,
-                    "auth_failure": True,
-                    "error": "401 invalid authentication credentials",
-                }
+        with (
+            patch.object(worker, "dom_prescan", AsyncMock(return_value="DOM")),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(
+                    return_value={
+                        "ok": False,
+                        "auth_failure": True,
+                        "error": "401 invalid authentication credentials",
+                    }
+                ),
             ),
         ):
-            decision = await worker.ask_vision("/tmp/probe.png", "action", "expected", 1)
+            decision = await worker.ask_vision(
+                "/tmp/probe.png", "action", "expected", 1
+            )
 
         self.assertEqual(decision["verdict"], "STOP")
         self.assertEqual(decision["page_state"], "error")
@@ -127,8 +144,38 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(blocker, "provider health check failed")
 
+    def test_detect_vision_auth_failure_treats_missing_api_key_as_blocker(self):
+        blocker = worker.detect_vision_auth_failure(
+            "ProviderAuthError: Google Generative AI API key is missing"
+        )
+
+        self.assertEqual(blocker, "google api key is missing")
+
+    def test_collect_opencode_text_includes_json_error_event_messages(self):
+        payload = b'{"type":"error","error":{"message":"Google Generative AI API key is missing","data":{"providerID":"google"}}}\n'
+
+        combined = worker.collect_opencode_text(payload, b"")
+
+        self.assertIn("google", combined.lower())
+        self.assertIn("api key is missing", combined.lower())
+
 
 class HeyPiggyWorkerClickPipelineTests(unittest.IsolatedAsyncioTestCase):
+    def test_next_action_to_worker_command_converts_accessibility_text_target_into_ref(
+        self,
+    ):
+        next_action = worker.NextAction(
+            type="type",
+            target="textbox @e19",
+            value="ops@example.com",
+        )
+
+        command, params = worker._next_action_to_worker_command(next_action)
+
+        self.assertEqual(command, "type_text")
+        self.assertEqual(params["ref"], "@e19")
+        self.assertEqual(params["text"], "ops@example.com")
+
     async def test_run_click_action_routes_click_ref_through_escalation_pipeline(self):
         gate = DummyGate()
         escalating_click = AsyncMock(return_value=True)

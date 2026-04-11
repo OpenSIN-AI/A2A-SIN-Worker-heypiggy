@@ -332,6 +332,12 @@ def collect_opencode_text(stdout: bytes, stderr: bytes = b"") -> str:
             continue
         if event.get("type") == "text":
             full_text += event.get("part", {}).get("text", "")
+        elif event.get("type") == "error":
+            error_data = event.get("error", {}) or {}
+            error_message = error_data.get("message", "")
+            provider_id = error_data.get("data", {}).get("providerID", "")
+            if provider_id or error_message:
+                full_text += f" {provider_id} {error_message}".strip()
     return full_text.strip()
 
 
@@ -350,6 +356,10 @@ def detect_vision_auth_failure(raw_text: str) -> str | None:
         return "invalid authentication credentials"
     if "authentication credentials" in lowered and "invalid" in lowered:
         return "invalid authentication credentials"
+    if "api key is missing" in lowered:
+        return "google api key is missing"
+    if "configuration is invalid" in lowered and "plugins" in lowered:
+        return "configuration invalid: plugins key"
 
     health_markers = (
         "vision health failure",
@@ -386,7 +396,7 @@ async def run_vision_model(
     nutzen, damit Auth-Fehler zentral erkannt und fail-closed behandelt werden.
     CONSEQUENCES: Gibt strukturierte Resultate mit `ok` und `auth_failure` zurück.
     """
-    cli_timeout = max(15, min(timeout, 25))
+    cli_timeout = max(20, min(timeout, 45))
     cmd = [
         "timeout",
         str(cli_timeout),
@@ -1297,11 +1307,26 @@ def _next_action_to_worker_command(next_action: NextAction) -> tuple[str, dict]:
     target = (next_action.target or "").strip()
     value = (next_action.value or "").strip()
 
+    def _extract_accessibility_ref(raw_target: str) -> str:
+        """
+        Extrahiert eine Accessibility-Referenz wie `@e19` aus freien Zielstrings.
+        WHY: Das Vision-Modell liefert nicht immer sauber `ref:@e19`, sondern oft
+             Formen wie `textbox @e19`. Diese müssen trotzdem in den ref-basierten
+             Bridge-Pfad geroutet werden.
+        CONSEQUENCES: Click- und Type-Aktionen verstehen sowohl explizite `ref:`-
+                      Targets als auch lose Accessibility-Referenzen.
+        """
+        match = re.search(r"(@e\d+)", raw_target or "", flags=re.IGNORECASE)
+        return match.group(1) if match else ""
+
     if action_type == "click":
         if target.startswith("selector:"):
             return "click_element", {"selector": target.split(":", 1)[1].strip()}
         if target.startswith("ref:"):
             return "click_ref", {"ref": target.split(":", 1)[1].strip()}
+        inferred_ref = _extract_accessibility_ref(target)
+        if inferred_ref:
+            return "click_ref", {"ref": inferred_ref}
         if target.startswith("text:"):
             return "vision_click", {"description": target.split(":", 1)[1].strip()}
         if target.startswith("coords:"):
@@ -1319,6 +1344,15 @@ def _next_action_to_worker_command(next_action: NextAction) -> tuple[str, dict]:
         return "none", {}
 
     if action_type == "type":
+        inferred_ref = ""
+        if target.startswith("ref:"):
+            inferred_ref = target.split(":", 1)[1].strip()
+        else:
+            inferred_ref = _extract_accessibility_ref(target)
+
+        if inferred_ref:
+            return "type_text", {"ref": inferred_ref, "text": value}
+
         selector = (
             target.split(":", 1)[1].strip()
             if target.startswith("selector:")
@@ -2610,8 +2644,17 @@ async def main():
 
             # Text-Eingabe — IMMER mit exaktem tabId
             elif next_action == "type_text":
-                params = {**next_params, **_tab_params()}
-                await execute_bridge("type_text", params)
+                ref = next_params.get("ref", "")
+                if ref:
+                    await execute_bridge("click_ref", {"ref": ref, **_tab_params()})
+                    await human_delay(0.4, 0.9)
+                    await execute_bridge(
+                        "type_text",
+                        {"text": next_params.get("text", ""), **_tab_params()},
+                    )
+                else:
+                    params = {**next_params, **_tab_params()}
+                    await execute_bridge("type_text", params)
 
             # Explizites Warten — nützlich bei Rate-Limits oder nach Auto-Submits
             elif next_action == "wait":
