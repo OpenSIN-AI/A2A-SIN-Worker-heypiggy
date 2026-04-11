@@ -49,8 +49,22 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_state_machine import (
+    AgentState,
+    IllegalTransitionError,
+    StepContext,
+    escalate,
+    fail_safe,
+    step_context_advance,
+)
 from predicate_checks import predicate_post_check, predicate_pre_check
-from vision_contract import NextAction, VisionResponse, VisionVerdict, parse_vision_response
+from sitepack_loader import SelectorNotFoundError, SitepackLoader
+from vision_contract import (
+    NextAction,
+    VisionResponse,
+    VisionVerdict,
+    parse_vision_response,
+)
 from vision_prompt import build_vision_prompt
 
 # ============================================================================
@@ -175,6 +189,19 @@ SESSION_DIR = ARTIFACT_DIR / "sessions"
 # Erstelle alle Verzeichnisse beim Start
 for d in [ARTIFACT_DIR, SCREENSHOT_DIR, AUDIT_DIR, SESSION_DIR]:
     d.mkdir(parents=True, exist_ok=True)
+
+
+# WHY: The sitepack loader externalizes every site-specific selector into a
+# versioned JSON manifest. This lets us adapt to HeyPiggy DOM drift without
+# rewriting worker logic.
+SITEPACK = SitepackLoader()
+SITEPACK_PATH = (
+    Path(__file__).resolve().parent / "sitepacks" / "heypiggy" / "v1" / "pack.json"
+)
+if SITEPACK_PATH.exists():
+    SITEPACK.load(str(SITEPACK_PATH))
+else:
+    print(f"[SITEPACK] Warnung: Sitepack nicht gefunden: {SITEPACK_PATH}")
 
 # ============================================================================
 # EXAKTE TAB-BINDUNG — GLOBAL STATE (PRIORITY -7.85)
@@ -759,16 +786,17 @@ async def resolve_survey_selector(selector: str, description: str = "") -> str:
         return selector
 
     lowered = selector.lower()
+    survey_list_selector = _sitepack_selector("survey_list_item", "div.survey-item")
     if "survey-item" not in lowered and "survey" not in lowered:
         return selector
 
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
-    js_code = """
-    (function() {
-      const cards = Array.from(document.querySelectorAll('div.survey-item')).map((el) => {
+    js_code = f"""
+    (function() {{
+      const cards = Array.from(document.querySelectorAll({json.dumps(survey_list_selector)})).map((el) => {{
         const r = el.getBoundingClientRect();
-        return {
+        return {{
           id: el.id || '',
           text: (el.textContent || '').replace(/\\s+/g, ' ').trim(),
           visible: el.offsetParent !== null,
@@ -776,10 +804,10 @@ async def resolve_survey_selector(selector: str, description: str = "") -> str:
           y: Math.round(r.top + r.height / 2),
           w: Math.round(r.width),
           h: Math.round(r.height),
-        };
-      });
+        }};
+      }});
       return cards.filter((card) => card.visible && card.id);
-    })();
+    }})();
     """
     scan = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
     cards = []
@@ -1180,6 +1208,82 @@ def _page_type_to_page_state(page_type: str) -> str:
     return mapping.get((page_type or "unknown").strip().lower(), "unknown")
 
 
+def _safe_transition(
+    ctx: StepContext, new_state: AgentState, reason: str
+) -> StepContext:
+    """
+    Führt einen FSM-Übergang aus, ohne den Worker wegen eines doppelten oder
+    unerwarteten Status-Mappings hart zu stoppen.
+    WHY: Vision + DOM können denselben realen Zustand in mehreren Schleifen
+         hintereinander melden. Dann wäre ein erneuter Übergang illegal, aber
+         nicht fatal — wir loggen das sauber statt mitten im Run zu crashen.
+    CONSEQUENCES: Der Worker behält die harte FSM, aber bleibt robust gegen
+                  harmlose Wiederholungen im gleichen UI-Zustand.
+    """
+    try:
+        return step_context_advance(ctx, new_state, reason)
+    except IllegalTransitionError as exc:
+        audit("warning", message=f"FSM transition ignored: {exc}")
+        return ctx
+
+
+def _transition_for_page_state(
+    ctx: StepContext,
+    page_state: str,
+    verdict: str,
+) -> StepContext:
+    """
+    Übersetzt Worker-Page-States in FSM-Zustände.
+    WHY: Der Vision-Layer arbeitet mit UI-Zuständen wie `login`, `dashboard`
+         oder `survey_active`, während die Alpha-Orchestrierung harte AgentState-
+         Phasen braucht. Diese Brücke hält beide Welten synchron.
+    CONSEQUENCES: Checkpoints, Logs und spätere Resume-Logik sehen immer einen
+                  echten AgentState statt nur loser UI-Strings.
+    """
+    if page_state == "login":
+        return _safe_transition(ctx, AgentState.AUTHENTICATE, "Login page detected")
+    if page_state == "onboarding":
+        return _safe_transition(ctx, AgentState.ONBOARD, "Onboarding page detected")
+    if page_state == "dashboard":
+        return _safe_transition(ctx, AgentState.DISCOVER_WORK, "Dashboard detected")
+    if page_state == "survey":
+        return _safe_transition(
+            ctx, AgentState.SELECT_TASK, "Survey selection detected"
+        )
+    if page_state == "survey_active":
+        if ctx.state == AgentState.SELECT_TASK:
+            _safe_transition(
+                ctx, AgentState.ENTER_TASK, "Entering selected survey task"
+            )
+        return _safe_transition(
+            ctx, AgentState.EXECUTE_TASK_LOOP, "Survey question loop active"
+        )
+    if page_state == "survey_done":
+        _safe_transition(ctx, AgentState.VALIDATE_OUTCOME, "Survey completion detected")
+        return _safe_transition(
+            ctx, AgentState.RECORD_RESULT, "Recording survey result"
+        )
+    if verdict == VisionVerdict.STOP.value:
+        return ctx
+    return ctx
+
+
+def _sitepack_selector(name: str, fallback: str) -> str:
+    """
+    Holt einen Selektor aus dem Sitepack und fällt laut auf einen bekannten
+    Hard-Fallback zurück, wenn der Pack-Eintrag fehlt.
+    WHY: Die Integration muss jetzt schon robust laufen, auch wenn einzelne
+         Sitepack-Einträge noch nicht final live-verifiziert sind.
+    CONSEQUENCES: Wir profitieren sofort von zentralen Selektoren, ohne dass
+                  der Worker bei einem fehlenden Key komplett unbenutzbar wird.
+    """
+    if not SITEPACK.is_loaded:
+        return fallback
+    try:
+        return SITEPACK.get_selector(name)
+    except (SelectorNotFoundError, RuntimeError):
+        return fallback
+
 
 def _next_action_to_worker_command(next_action: NextAction) -> tuple[str, dict]:
     """
@@ -1215,7 +1319,11 @@ def _next_action_to_worker_command(next_action: NextAction) -> tuple[str, dict]:
         return "none", {}
 
     if action_type == "type":
-        selector = target.split(":", 1)[1].strip() if target.startswith("selector:") else target
+        selector = (
+            target.split(":", 1)[1].strip()
+            if target.startswith("selector:")
+            else target
+        )
         return "type_text", {"selector": selector, "text": value}
 
     if action_type == "scroll":
@@ -1230,7 +1338,6 @@ def _next_action_to_worker_command(next_action: NextAction) -> tuple[str, dict]:
     return "none", {}
 
 
-
 def _copy_vision_response(response: VisionResponse, update: dict) -> VisionResponse:
     """
     Erstellt ein aktualisiertes VisionResponse-Objekt kompatibel mit Pydantic v1/v2.
@@ -1240,7 +1347,6 @@ def _copy_vision_response(response: VisionResponse, update: dict) -> VisionRespo
     if hasattr(response, "model_copy"):
         return response.model_copy(update=update)
     return response.copy(update=update)
-
 
 
 def _apply_vision_response_policy(response: VisionResponse) -> VisionResponse:
@@ -1266,7 +1372,6 @@ def _apply_vision_response_policy(response: VisionResponse) -> VisionResponse:
         return _copy_vision_response(response, {"verdict": VisionVerdict.ESCALATE})
 
     return response
-
 
 
 def _vision_response_to_decision(response: VisionResponse) -> dict:
@@ -1626,7 +1731,10 @@ async def escalating_click(
     if not selector and description:
         desc_lower = description.lower()
         if "umfrage" in desc_lower or "survey" in desc_lower or "€" in desc_lower:
-            selector = await resolve_survey_selector("div.survey-item", description)
+            selector = await resolve_survey_selector(
+                _sitepack_selector("survey_list_item", "div.survey-item"),
+                description,
+            )
 
     methods = []
     if ref:
@@ -2106,7 +2214,6 @@ async def auto_resolve_blocker(
     return False
 
 
-
 def _selector_for_predicate(next_action: str, next_params: dict) -> str:
     """
     Extrahiert den CSS-Selektor für die DOM-Predicate-Prüfungen.
@@ -2187,6 +2294,14 @@ async def run_click_action(
 
 
 async def main():
+    ctx = StepContext(
+        state=AgentState.INIT,
+        step_index=0,
+        max_steps=MAX_STEPS,
+        task_url="https://www.heypiggy.com/login",
+    )
+    _safe_transition(ctx, AgentState.PREFLIGHT, "Initializing worker")
+
     audit(
         "start",
         message="A2A-SIN-Worker-HeyPiggy Vision Gate v2.0",
@@ -2199,11 +2314,15 @@ async def main():
         await wait_for_extension(timeout=600)
     except Exception as e:
         audit("stop", reason=f"Bridge-Verbindung fehlgeschlagen: {e}")
+        _safe_transition(
+            ctx, AgentState.FAIL_SAFE, f"Bridge-Verbindung fehlgeschlagen: {e}"
+        )
         return
 
     # 2. PRE-FLIGHT — Pflicht-Env + Vision-Auth müssen VOR Browser-Mutation healthy sein
     preflight = await ensure_worker_preflight()
     if not preflight.get("ok"):
+        _safe_transition(ctx, AgentState.FAIL_SAFE, "Preflight fehlgeschlagen")
         return
 
     # Credentials erst NACH erfolgreichem fail-closed Preflight auslesen.
@@ -2214,6 +2333,9 @@ async def main():
 
     # 3. VISION GATE CONTROLLER INITIALISIEREN
     gate = VisionGateController()
+    _safe_transition(
+        ctx, AgentState.ACQUIRE_SESSION, "Bridge healthy and gate initialized"
+    )
 
     # 4. INITIALE NAVIGATION
     action_desc = "Navigiere zu HeyPiggy Dashboard"
@@ -2246,11 +2368,17 @@ async def main():
             return
     except Exception as e:
         audit("stop", reason=f"Initiale Navigation fehlgeschlagen: {e}")
+        _safe_transition(
+            ctx, AgentState.FAIL_SAFE, f"Initiale Navigation fehlgeschlagen: {e}"
+        )
         return
 
     # Verifikation: CURRENT_TAB_ID muss jetzt gesetzt sein
     if CURRENT_TAB_ID is None:
         audit("stop", reason="CURRENT_TAB_ID ist nach Init immer noch None — Abbruch")
+        _safe_transition(
+            ctx, AgentState.FAIL_SAFE, "CURRENT_TAB_ID ist nach Init immer noch None"
+        )
         return
 
     # Warten auf Seitenlade
@@ -2261,15 +2389,32 @@ async def main():
 
     # 5. VISION GATE LOOP — Das Herzstück
     while gate.should_continue():
+        ctx.no_progress_counter = gate.no_progress_count
+        ctx.step_index = gate.total_steps
+        if gate.no_progress_count >= MAX_NO_PROGRESS:
+            _safe_transition(
+                ctx,
+                AgentState.FAIL_SAFE,
+                "Gate detected no-progress threshold exhaustion",
+            )
+            break
+        if gate.consecutive_retries >= MAX_RETRIES:
+            _safe_transition(ctx, AgentState.ESCALATE, "Gate detected retry exhaustion")
+            break
+
         # ---- Bridge-Health-Check vor JEDER Iteration ----
         if not await check_bridge_alive():
             audit("stop", reason="Bridge nicht erreichbar, Abbruch")
+            _safe_transition(
+                ctx, AgentState.FAIL_SAFE, "Bridge nicht erreichbar während Vision-Loop"
+            )
             break
 
         # ---- SCREENSHOT ----
         img_path, img_hash = await take_screenshot(
             gate.total_steps + 1, label=action_desc[:20]
         )
+        ctx.last_page_fingerprint = img_hash or ctx.last_page_fingerprint
         if not img_path:
             gate.record_step("RETRY", None)
             await human_delay(2.0, 4.0)
@@ -2280,6 +2425,9 @@ async def main():
         await human_delay(5.0, 10.0)
 
         # ---- VISION CHECK ----
+        _safe_transition(
+            ctx, AgentState.ASSESS_PAGE, "Assessing current page state via vision"
+        )
         decision = await ask_vision(
             img_path, action_desc, expected, gate.total_steps + 1
         )
@@ -2301,6 +2449,7 @@ async def main():
             verdict = VisionVerdict.ESCALATE.value
             reason = f"Non-resolvable blocker: {blocker.get('type')} — {blocker.get('detail', '')}"
 
+        _transition_for_page_state(ctx, page_state, verdict)
         gate.record_step(verdict, img_hash, page_state)
 
         print(f"\n{'=' * 60}")
@@ -2338,6 +2487,10 @@ async def main():
                 blocker=blocker,
             )
             await save_session("stop_state")
+            if verdict == VisionVerdict.ESCALATE.value:
+                _safe_transition(ctx, AgentState.ESCALATE, reason)
+                break
+            _safe_transition(ctx, AgentState.FAIL_SAFE, reason)
             break
 
         # ---- RETRY ----
@@ -2356,6 +2509,9 @@ async def main():
                 total_steps=gate.total_steps,
             )
             await save_session("completed")
+            _safe_transition(
+                ctx, AgentState.COMPLETE, "Vision reported task completion"
+            )
             break
 
         # ---- SURVEY DONE — Bestätigungsseite erkannt ----
@@ -2464,6 +2620,7 @@ async def main():
             # Navigation — IMMER mit exaktem tabId, KEIN Fallback ohne tabId
             elif next_action == "navigate":
                 url = next_params.get("url", "")
+                ctx.task_url = url or ctx.task_url
                 await execute_bridge("navigate", {"url": url, **_tab_params()})
                 await save_session(f"nav_{gate.total_steps}")
 
