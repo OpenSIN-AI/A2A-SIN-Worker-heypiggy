@@ -1777,6 +1777,17 @@ async def escalating_click(
             audit("error", message=f"Klick-Methode {method_name} Exception: {e}")
             continue
 
+    # DOM-FALLBACK: Wenn alle 5 Klick-Methoden fehlschlagen, versuche description-basierte Textsuche
+    # WHY: vision_click oder andere Methoden können durch Rate-Limit oder komplexe Modals blockiert werden.
+    # Ein simpler sichtbarer Button mit Text (z.B. "Nächste", "Weiter") umgeht Vision komplett.
+    if description:
+        audit(
+            "action",
+            message=f"DOM-Fallback: Versuche click_visible_button_with_text('{description[:40]}')",
+        )
+        if await click_visible_button_with_text(description):
+            return True
+
     audit(
         "error",
         message="ALLE 5 Klick-Methoden fehlgeschlagen!",
