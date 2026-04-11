@@ -1,0 +1,25 @@
+{
+  "site": "heypiggy.com",
+  "version": "1.0.0",
+  "selectors": {
+    "login_email": "input[type='email']",
+    "login_password": "input[type='password']",
+    "login_submit": "button[type='submit']",
+    "consent_next": "#submit-button-cpx",
+    "survey_list_item": ".survey-card",
+    "survey_start": "button.start-survey",
+    "survey_next": "button.next-question, button[data-action='next']",
+    "survey_submit": "button.submit-survey, button[type='submit'].final",
+    "completion_indicator": ".survey-complete, .thank-you, .completion-message"
+  },
+  "flows": {
+    "login": ["navigate_to_login", "fill_email", "fill_password", "click_submit"],
+    "onboard": ["click_consent_next"],
+    "survey_execute": ["click_start", "answer_loop", "click_submit"]
+  },
+  "page_signatures": {
+    "login": ["input[type='email']", "input[type='password']"],
+    "survey_list": [".survey-card", ".dashboard"],
+    "survey_complete": [".thank-you", ".completion", ".survey-complete"]
+  }
+}
