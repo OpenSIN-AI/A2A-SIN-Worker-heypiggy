@@ -286,14 +286,15 @@ def ensure_vision_probe_screenshot() -> str:
     return str(probe_path)
 
 
-def collect_opencode_text(stdout: bytes) -> str:
+def collect_opencode_text(stdout: bytes, stderr: bytes = b"") -> str:
     """
     Extrahiert Text-Events aus `opencode run --format json`.
-    WHY: OpenSIN/sincode liefert JSONL-Ereignisse statt einer einzigen Text-Antwort.
-    CONSEQUENCES: Alle Vision-Call-Sites können denselben robusten Parser wiederverwenden.
+    WHY: opencode kann Events je nach TTY auf stdout oder stderr schreiben.
+    Daher kombinieren wir beide Streams.
     """
+    combined = stdout + stderr
     full_text = ""
-    for line in stdout.decode("utf-8", errors="replace").splitlines():
+    for line in combined.decode("utf-8", errors="replace").splitlines():
         try:
             event = json.loads(line)
         except Exception:
@@ -383,7 +384,7 @@ async def run_vision_model(
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        full_text = collect_opencode_text(stdout)
+        full_text = collect_opencode_text(stdout, stderr)
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
         combined = "\n".join(part for part in [full_text, stderr_text] if part)
         auth_error = detect_vision_auth_failure(combined)
