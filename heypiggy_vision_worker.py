@@ -1173,6 +1173,7 @@ ABSOLUTE PFLICHT-REGELN FÜR SELEKTOREN:
 - Nutze ghost_click für alle div-basierten Karten (cursor: pointer)
 - Playwright-only Texte-Selektoren wie :contains(), :has-text() oder :text() sind VERBOTEN.
 - Wenn du Textreferenz brauchst, nenne den echten CSS-Selektor aus dem DOM-Pre-Scan oder eine eindeutige #id.
+- CONSENT-MODAL "Nächste" Button: IMMER #submit-button-cpx nutzen! NIEMALS button.modal-button-positive — das trifft dutzende versteckte Buttons im DOM und funktioniert nicht!
 
 KLICK-STRATEGIE:
 - Für Radio-Buttons ([radio @eX] im Accessibility-Tree) → click_ref mit {{"ref": "@eX"}} — das ist PFLICHT!
@@ -2056,8 +2057,11 @@ async def main():
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     try:
         audit("navigate", url="https://www.heypiggy.com/login")
+        # KRITISCH: active: True — Tab MUSS im Vordergrund sein!
+        # Mit active: False läuft der Tab im Hintergrund → Screenshots zeigen falschen Inhalt
+        # → Vision Gate sieht nichts → DOM-Verifikation gibt url="" zurück → Worker hängt
         tab_res = await execute_bridge(
-            "tabs_create", {"url": "https://www.heypiggy.com/login", "active": False}
+            "tabs_create", {"url": "https://www.heypiggy.com/login", "active": True}
         )
         if isinstance(tab_res, dict) and "tabId" in tab_res:
             CURRENT_TAB_ID = tab_res["tabId"]
