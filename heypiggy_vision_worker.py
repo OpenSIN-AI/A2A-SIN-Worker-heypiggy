@@ -49,6 +49,10 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from predicate_checks import predicate_post_check, predicate_pre_check
+from vision_contract import NextAction, VisionResponse, VisionVerdict, parse_vision_response
+from vision_prompt import build_vision_prompt
+
 # ============================================================================
 # USER PROFIL — Jeremy Schulze
 # WHY: Der Worker muss Profil-Fragen (Region, Wohnort, Geschlecht, Name etc.)
@@ -1158,6 +1162,143 @@ async def dom_prescan():
     return "\n\n".join(filter(None, [page_context, snapshot_info, clickable_info]))
 
 
+def _page_type_to_page_state(page_type: str) -> str:
+    """
+    Übersetzt den neuen Vision-V2 `page_type` in die vorhandenen Worker-Zustände.
+    WHY: Der Rest des Workers arbeitet weiterhin mit den etablierten Zustandsnamen
+         (`page_state`), während der neue Vision-Vertrag bewusst kompakter ist.
+    CONSEQUENCES: Die Integration bleibt klein und rückwärtskompatibel.
+    """
+    mapping = {
+        "login": "login",
+        "survey_list": "dashboard",
+        "survey_question": "survey_active",
+        "survey_complete": "survey_done",
+        "captcha": "captcha",
+        "unknown": "unknown",
+    }
+    return mapping.get((page_type or "unknown").strip().lower(), "unknown")
+
+
+
+def _next_action_to_worker_command(next_action: NextAction) -> tuple[str, dict]:
+    """
+    Übersetzt die generische Vision-V2 Aktion in konkrete Worker-/Bridge-Befehle.
+    WHY: Der JSON-Vertrag soll modellseitig generisch bleiben, während der Worker
+         weiterhin seine bestehenden spezialisierten Klick- und Scrollpfade nutzt.
+    CONSEQUENCES: Alte Bridge-Methoden können weiterverwendet werden, ohne dass das
+                  Modell deren gesamte interne Namenswelt kennen muss.
+    """
+    action_type = (next_action.type or "none").strip().lower()
+    target = (next_action.target or "").strip()
+    value = (next_action.value or "").strip()
+
+    if action_type == "click":
+        if target.startswith("selector:"):
+            return "click_element", {"selector": target.split(":", 1)[1].strip()}
+        if target.startswith("ref:"):
+            return "click_ref", {"ref": target.split(":", 1)[1].strip()}
+        if target.startswith("text:"):
+            return "vision_click", {"description": target.split(":", 1)[1].strip()}
+        if target.startswith("coords:"):
+            coords = target.split(":", 1)[1].split(",", 1)
+            if len(coords) == 2:
+                try:
+                    return "click_coordinates", {
+                        "x": int(coords[0].strip()),
+                        "y": int(coords[1].strip()),
+                    }
+                except ValueError:
+                    pass
+        if target:
+            return "vision_click", {"description": target}
+        return "none", {}
+
+    if action_type == "type":
+        selector = target.split(":", 1)[1].strip() if target.startswith("selector:") else target
+        return "type_text", {"selector": selector, "text": value}
+
+    if action_type == "scroll":
+        direction = value.lower() if value else "down"
+        if direction in {"up", "scroll_up"}:
+            return "scroll_up", {}
+        return "scroll_down", {}
+
+    if action_type == "wait":
+        return "wait", {"reason": value or target or "vision_requested_wait"}
+
+    return "none", {}
+
+
+
+def _copy_vision_response(response: VisionResponse, update: dict) -> VisionResponse:
+    """
+    Erstellt ein aktualisiertes VisionResponse-Objekt kompatibel mit Pydantic v1/v2.
+    WHY: HF-VMs können je nach Image unterschiedliche Pydantic-Versionen haben.
+    CONSEQUENCES: Die Policy-Logik bleibt versionsstabil und testbar.
+    """
+    if hasattr(response, "model_copy"):
+        return response.model_copy(update=update)
+    return response.copy(update=update)
+
+
+
+def _apply_vision_response_policy(response: VisionResponse) -> VisionResponse:
+    """
+    Erzwingt fail-closed Worker-Regeln auf dem bereits geparsten Vision-Objekt.
+    WHY: Auch formal gültiges JSON darf die Schleife nicht blind fortsetzen, wenn
+         die Konfidenz zu niedrig ist oder ein nicht lösbarer Blocker vorliegt.
+    CONSEQUENCES: Niedrige Sicherheit wird deterministisch zu RETRY oder ESCALATE.
+    """
+    if response.confidence < 0.6:
+        return _copy_vision_response(
+            response,
+            {
+                "verdict": VisionVerdict.RETRY,
+                "reasoning": (
+                    f"Low-confidence vision response ({response.confidence:.2f}); retry required."
+                ),
+                "next_action": NextAction(type="none", target="", value=""),
+            },
+        )
+
+    if response.blocker and not response.blocker.auto_resolvable:
+        return _copy_vision_response(response, {"verdict": VisionVerdict.ESCALATE})
+
+    return response
+
+
+
+def _vision_response_to_decision(response: VisionResponse) -> dict:
+    """
+    Wandelt das strikte Vision-V2 Modell in das bestehende Worker-Decision-Dict um.
+    WHY: So kann der Hauptloop minimal angepasst werden, während Tests und Prompt
+         bereits vollständig auf dem neuen Vertrag laufen.
+    CONSEQUENCES: Alte Konsumenten lesen weiterhin `page_state`, `next_action` und
+                  `next_params`, bekommen diese Felder jetzt aber aus validiertem JSON.
+    """
+    next_action_name, next_params = _next_action_to_worker_command(response.next_action)
+    blocker = response.blocker
+    return {
+        "verdict": response.verdict.value,
+        "confidence": response.confidence,
+        "page_type": response.page_type,
+        "page_state": _page_type_to_page_state(response.page_type),
+        "reason": response.reasoning,
+        "progress": bool(response.dom_hash),
+        "next_action": next_action_name,
+        "next_params": next_params,
+        "dom_hash": response.dom_hash,
+        "blocker": {
+            "type": blocker.type,
+            "detail": blocker.detail,
+            "auto_resolvable": blocker.auto_resolvable,
+        }
+        if blocker
+        else None,
+    }
+
+
 # ============================================================================
 # VISION GATE — Gemini 3 Flash Analyse mit gehärtetem Prompt + DOM-Kontext
 # ============================================================================
@@ -1167,117 +1308,23 @@ async def ask_vision(
     screenshot_path: str, action_desc: str, expected: str, step_num: int
 ):
     """
-    Sendet einen Screenshot + DOM-Kontext an Gemini 3 Flash.
-    WHY: KEIN EINZIGER KLICK ohne dass das Vision-Modell den Bildschirm gesehen hat.
-    CONSEQUENCES: Bei Parse-Fehler wird RETRY zurückgegeben (nie ein Crash).
+    Sendet einen Screenshot + DOM-Kontext an das Vision-Modell und erzwingt den
+    Vision-Gate-V2 JSON-Vertrag.
+    WHY: Das Modell darf keine freien Texte mehr liefern, weil die Worker-Logik
+         auf einem strikt validierten Antwortschema aufbauen muss.
+    CONSEQUENCES: Jede Antwort wird über `parse_vision_response()` normalisiert;
+                  bei Parse- oder Policy-Fehlern fällt der Worker fail-closed auf
+                  RETRY oder STOP zurück.
     """
-    # DOM Pre-Scan: Echte Selektoren VOR dem Vision-Call holen!
+    # DOM-Kontext bleibt Pflicht, damit das Modell echte Selektoren und Ref-Hinweise
+    # sieht statt sich Klick-Ziele auszudenken.
     dom_context = await dom_prescan()
 
-    # Profil-Kontext aus gespeichertem User-Profil laden
-    # WHY: Gemini muss wissen wer der User ist um Profil-Fragen korrekt zu beantworten.
-    #      Ohne Profil würde Gemini zufällig wählen → falsche Region, falscher Name etc.
+    # Profil-Kontext bleibt zusätzlich erhalten, damit Profil- und Login-Fragen auf
+    # echten Nutzerdaten basieren statt auf Fantasie-Antworten.
     profile_context = _build_profile_context()
-
-    prompt = f"""Du bist der Vision Gate Controller der OpenSIN-Bridge.
-
-KONTEXT:
-- Letzte Aktion: '{action_desc}'
-- Erwartetes Ergebnis: '{expected}'
-- Schritt Nummer: {step_num} von maximal {MAX_STEPS}
-
-{profile_context}
-
-{dom_context}
-
-AUFGABE — Analysiere den Screenshot UND die DOM-Daten oben PRÄZISE:
-
-1. BLOCKIERUNGEN: Sind Captchas, Cookie-Banner, Consent-Modals, Login-Dialoge, Popups, Overlays oder Error-Messages sichtbar?
-   → Wenn ja: Diese ZUERST schliessen/akzeptieren!
-
-2. AKTUELLER STATUS: Was zeigt die Seite GENAU an?
-
-3. FORTSCHRITT: Hat sich gegenüber der letzten Aktion etwas verändert?
-
-4. NÄCHSTE AKTION: Was muss als nächstes passieren?
-
-VERFÜGBARE AKTIONEN (wähle GENAU EINE):
-- "click_element" — Standard CSS-Selektor Klick. Params: {{"selector": "#id-oder-.klasse"}}
-- "click_ref" — Klick per Accessibility-Tree-Ref (z.B. @e9). BEVORZUGT für Radio-Buttons, Checkboxen, Links ohne ID! Params: {{"ref": "@e9"}}
-- "ghost_click" — Voller Pointer+Mouse Event-Stack für SPA/React-Elemente. Params: {{"selector": "#echte-id"}}
-- "vision_click" — Beschreibungsbasierter Klick. Params: {{"description": "Text des Elements"}}
-- "click_coordinates" — Absoluter Pixel-Klick. Params: {{"x": 100, "y": 200}}
-- "keyboard" — Tastatur verwenden (z.B. Tab, Enter). Params: {{"keys": ["Enter"], "selector": "#optional-id"}}
-- "type_text" — Text eingeben. Params: {{"selector": "css", "text": "wert"}}
-- "navigate" — URL aufrufen. Params: {{"url": "https://..."}}
-- "scroll_down" — Seite nach unten scrollen
-- "scroll_up" — Seite nach oben scrollen
-- "none" — Aufgabe erledigt, nichts mehr zu tun
-
-ABSOLUTE PFLICHT-REGELN FÜR SELEKTOREN:
-- NUTZE NUR Selektoren aus der DOM-Analyse oben! NIEMALS raten!
-- Pseudo-Selektoren wie :has-text(), :contains(), :has() sind VERBOTEN (existieren nicht in CSS)!
-- Bevorzuge #id Selektoren (z.B. #survey-65076903) — die sind IMMER eindeutig!
-- WICHTIG: input[type='radio'][value='X'] NIEMALS nutzen — HeyPiggy Radio-Buttons haben KEINE value= Attribute!
-- Für Radio-Buttons → IMMER click_ref mit dem @eX Ref aus dem ACCESSIBILITY-TREE oben nutzen!
-- Für Survey-Karten auf HeyPiggy: Die Klasse ist .survey-item (NICHT .survey-card!), jede Karte hat eine eindeutige ID wie #survey-XXXXXXXX
-- Nutze ghost_click für alle div-basierten Karten (cursor: pointer)
-- Playwright-only Texte-Selektoren wie :contains(), :has-text() oder :text() sind VERBOTEN.
-- Wenn du Textreferenz brauchst, nenne den echten CSS-Selektor aus dem DOM-Pre-Scan oder eine eindeutige #id.
-- CONSENT-MODAL "Nächste" Button: IMMER #submit-button-cpx nutzen! NIEMALS button.modal-button-positive — das trifft dutzende versteckte Buttons im DOM und funktioniert nicht!
-
-KLICK-STRATEGIE:
-- Für Radio-Buttons ([radio @eX] im Accessibility-Tree) → click_ref mit {{"ref": "@eX"}} — das ist PFLICHT!
-- Für <button>, <a>, <input> → click_element
-- Für div.survey-item / div[cursor=pointer] → ghost_click mit #id-Selektor
-- Für Elemente ohne CSS-Selektor → vision_click mit Beschreibung
-- Letzter Ausweg → click_coordinates mit x,y aus der DOM-Analyse
-
-PAGE STATE REGELN — KRITISCH:
-- "dashboard" → HeyPiggy Startseite mit Survey-Liste, noch keine Umfrage gestartet
-- "login" → Login-Formular sichtbar
-- "onboarding" → Profil-Modal/Onboarding-Fragen (Region, Name, etc.) — VOR dem eigentlichen Dashboard!
-- "survey_active" → UMFRAGE LÄUFT GERADE! Fragen werden angezeigt (Radio-Buttons, Dropdowns, Textfelder, Skalen). NIEMALS "none" zurückgeben solange Fragen sichtbar sind!
-- "survey" → Survey-Auswahl / Übergangsseite (zwischen Dashboard und aktiver Umfrage)
-- "survey_done" → Umfrage erfolgreich abgeschlossen, Bestätigungsseite
-- "error" → Fehlermeldung, Timeout oder unbekannter Zustand
-- "unknown" → Seite nicht klar erkennbar
-
-PROFIL-FRAGEN REGELN — KRITISCH:
-- Wenn ein Modal mit Profil-Fragen sichtbar ist (Region, Wohnort, Geschlecht, Name, Alter etc.):
-  page_state="onboarding" setzen!
-- Nutze IMMER das BENUTZERPROFIL oben um die korrekte Antwort zu wählen!
-- Region-Frage ("In welcher Region wohnst du?"): IMMER "Norden" wählen (Jeremy wohnt in Berlin, wählt Norden)
-- Nach Auswahl der Antwort → "Nächste"/"Weiter" Button klicken!
-- Profil-Modals MÜSSEN vollständig ausgefüllt werden bevor Umfragen gestartet werden!
-
-UMFRAGE-REGELN — ÄUSSERST WICHTIG:
-- Wenn page_state="survey_active": BEENDE DIE UMFRAGE VOLLSTÄNDIG! Klicke ALLE Fragen durch bis zur Bestätigungsseite!
-- Wenn eine Frage sichtbar ist → IMMER beantworten und "Weiter"/"Next"/"Submit" klicken!
-- NIEMALS next_action="none" wenn noch Fragen offen sind!
-- Radio-Button Fragen → click_ref mit dem @eX Ref aus dem Accessibility-Tree (NICHT click_element mit value=!)
-- Dropdown-Fragen → click_element auf die gewünschte Option
-- Freitext-Fragen → type_text mit einer sinnvollen Antwort
-- Skalen-Fragen (1-5, 1-7, etc.) → click_element auf mittlere oder positive Option
-- "Weiter"/"Next"/"Fortfahren"/"Continue"/"Submit" Buttons → IMMER klicken nach einer Antwort!
-- Fortschrittsbalken sichtbar? → Umfrage läuft noch, page_state="survey_active"!
-
-REGELN:
-- Antworte AUSSCHLIESSLICH mit gültigem JSON! Kein Markdown, kein Text!
-- Bei Captchas oder unlösbaren Blockierungen: verdict="STOP"
-- Bei unveränderter Seite: verdict="RETRY" und schlage eine ANDERE Methode vor!
-- Credentials NIEMALS ausgeben! Nutze "<EMAIL>" und "<PASSWORD>" als Platzhalter.
-- Wähle IMMER die lukrativste verfügbare Umfrage (höchster €-Betrag)!
-
-ANTWORT-FORMAT (NUR dieses JSON, NICHTS anderes):
-{{
-  "verdict": "PROCEED",
-  "page_state": "dashboard|login|onboarding|survey|survey_active|survey_done|error|unknown",
-  "reason": "Kurze Analyse...",
-  "progress": true,
-  "next_action": "click_ref",
-  "next_params": {{"ref": "@e9"}}
-}}"""
+    prompt_dom_snapshot = "\n\n".join(filter(None, [profile_context, dom_context]))
+    prompt = build_vision_prompt(action_desc, expected, prompt_dom_snapshot)
 
     run_result = await run_vision_model(
         prompt,
@@ -1290,68 +1337,69 @@ ANTWORT-FORMAT (NUR dieses JSON, NICHTS anderes):
         error_reason = run_result.get("error", "Vision call failed")
         if run_result.get("auth_failure"):
             return {
-                "verdict": "STOP",
+                "verdict": VisionVerdict.STOP.value,
+                "confidence": 0.0,
                 "reason": f"Vision auth failed: {error_reason}",
                 "next_action": "none",
+                "next_params": {},
                 "page_state": "error",
+                "page_type": "unknown",
                 "progress": False,
+                "dom_hash": "",
+                "blocker": {
+                    "type": "auth",
+                    "detail": error_reason,
+                    "auto_resolvable": False,
+                },
             }
         return {
-            "verdict": "RETRY",
+            "verdict": VisionVerdict.RETRY.value,
+            "confidence": 0.0,
             "reason": error_reason,
             "next_action": "none",
+            "next_params": {},
             "page_state": "unknown",
+            "page_type": "unknown",
             "progress": False,
+            "dom_hash": "",
+            "blocker": None,
         }
 
     full_text = run_result.get("text", "")
 
     try:
-        # Markdown-Block entfernen falls vorhanden
-        if "```json" in full_text:
-            full_text = full_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in full_text:
-            parts = full_text.split("```")
-            if len(parts) >= 3:
-                full_text = parts[1].strip()
-                # Falls der erste Teil nach ``` mit "json" beginnt, entfernen
-                if full_text.startswith("json"):
-                    full_text = full_text[4:].strip()
-
-        result = json.loads(full_text)
+        response = parse_vision_response(full_text)
+        response = _apply_vision_response_policy(response)
+        decision = _vision_response_to_decision(response)
         audit(
             "vision_check",
             step=step_num,
-            verdict=result.get("verdict"),
-            page_state=result.get("page_state"),
-            reason=result.get("reason", "")[:150],
-            next_action=result.get("next_action"),
+            verdict=decision.get("verdict"),
+            confidence=decision.get("confidence"),
+            page_state=decision.get("page_state"),
+            reason=decision.get("reason", "")[:150],
+            next_action=decision.get("next_action"),
         )
-        return result
+        return decision
 
-    except json.JSONDecodeError as e:
+    except Exception as e:
         audit(
             "error",
-            message=f"Vision JSON Parse Error: {e}",
+            message=f"Vision contract parse error: {e}",
             step=step_num,
             raw_output=full_text[:500],
         )
         return {
-            "verdict": "RETRY",
-            "reason": f"JSON Parse Error: {e}",
+            "verdict": VisionVerdict.RETRY.value,
+            "confidence": 0.0,
+            "reason": f"Vision contract parse error: {e}",
             "next_action": "none",
+            "next_params": {},
             "page_state": "unknown",
+            "page_type": "unknown",
             "progress": False,
-        }
-
-    except Exception as e:
-        audit("error", message=f"Vision Exception: {e}", step=step_num)
-        return {
-            "verdict": "RETRY",
-            "reason": str(e),
-            "next_action": "none",
-            "page_state": "unknown",
-            "progress": False,
+            "dom_hash": "",
+            "blocker": None,
         }
 
 
@@ -2020,6 +2068,61 @@ def inject_credentials(params: dict, email: str, pwd: str) -> dict:
     return params
 
 
+async def auto_resolve_blocker(
+    blocker: dict | None, next_action: str, next_params: dict, step_num: int
+) -> bool:
+    """
+    Versucht bekannte, explizit als automatisch lösbar markierte Blocker aufzulösen.
+    WHY: Vision Gate V2 liefert jetzt strukturierte Blocker-Daten statt nur Text.
+         Dadurch kann der Worker bei Modals oder Rate-Limits gezielt reagieren.
+    CONSEQUENCES: Gibt nur dann `True` zurück, wenn wirklich eine Auto-Resolution
+                  ausgeführt wurde; nicht lösbare Fälle eskalieren später hart.
+    """
+    if not blocker or not blocker.get("auto_resolvable"):
+        return False
+
+    blocker_type = (blocker.get("type") or "").strip().lower()
+    blocker_detail = blocker.get("detail", "")
+    audit(
+        "state_change",
+        message=f"Auto-resolvable blocker erkannt: {blocker_type} — {blocker_detail[:120]}",
+        step=step_num,
+    )
+
+    # Wenn das Vision-Modell bereits eine konkrete Folgeaktion vorgeschlagen hat,
+    # übernimmt der Hauptloop die tatsächliche Ausführung. Hier melden wir nur,
+    # dass dieser Blocker prinzipiell automatisch behandelbar ist.
+    if next_action != "none":
+        return False
+
+    if blocker_type == "modal":
+        await keyboard_action(["Escape"])
+        return True
+
+    if blocker_type == "rate_limit":
+        await human_delay(4.0, 7.0)
+        return True
+
+    return False
+
+
+
+def _selector_for_predicate(next_action: str, next_params: dict) -> str:
+    """
+    Extrahiert den CSS-Selektor für die DOM-Predicate-Prüfungen.
+    WHY: Nur CSS-Selektoren können zuverlässig auf Sichtbarkeit/Klickbarkeit und
+         Okklusion geprüft werden; Ref- oder Koordinaten-Klicks haben keinen DOM-
+         Selektor, werden aber trotzdem mit einem DOM-Hash-Snapshot versehen.
+    CONSEQUENCES: Selektorlose Aktionen liefern einen leeren String und werden von
+                  den Predicate-Checks als `skipped` behandelt.
+    """
+    if next_action == "type_text":
+        return normalize_selector(next_params.get("selector", ""))
+    if next_action == "click_element":
+        return normalize_selector(next_params.get("selector", ""))
+    return ""
+
+
 # ============================================================================
 # SCROLL-HANDLER
 # ============================================================================
@@ -2181,14 +2284,23 @@ async def main():
             img_path, action_desc, expected, gate.total_steps + 1
         )
 
-        verdict = decision.get("verdict", "RETRY")
+        verdict = decision.get("verdict", VisionVerdict.RETRY.value)
         reason = decision.get("reason", "Kein Grund")
         page_state = decision.get("page_state", "unknown")
+        page_type = decision.get("page_type", "unknown")
         next_action = decision.get("next_action", "none")
         next_params = decision.get("next_params", {})
         progress = decision.get("progress", False)
+        blocker = decision.get("blocker")
+        confidence = float(decision.get("confidence", 0.0) or 0.0)
 
         # Schritt aufzeichnen
+        # WHY: Blocker-Eskalationen müssen VOR dem Gate-Tracking angewendet werden,
+        # damit der Retry-/Stop-Zähler den finalen, nicht den vorläufigen Zustand sieht.
+        if blocker and not blocker.get("auto_resolvable"):
+            verdict = VisionVerdict.ESCALATE.value
+            reason = f"Non-resolvable blocker: {blocker.get('type')} — {blocker.get('detail', '')}"
+
         gate.record_step(verdict, img_hash, page_state)
 
         print(f"\n{'=' * 60}")
@@ -2204,14 +2316,32 @@ async def main():
         )
         print(f"{'=' * 60}\n")
 
-        # ---- STOP ----
-        if verdict == "STOP":
-            audit("stop", reason=reason, page_state=page_state)
+        # ---- BLOCKER POLICY ----
+        # WHY: Vision Gate V2 liefert Blocker als strukturierte Daten. Dadurch kann
+        # der Worker automatische Fälle behandeln und harte Fälle explizit eskalieren.
+        if blocker and blocker.get("auto_resolvable"):
+            resolved_inline = await auto_resolve_blocker(
+                blocker, next_action, next_params, gate.total_steps
+            )
+            if resolved_inline:
+                await human_delay(1.0, 2.0)
+                continue
+
+        # ---- STOP / ESCALATE ----
+        if verdict in {VisionVerdict.STOP.value, VisionVerdict.ESCALATE.value}:
+            audit(
+                "stop",
+                reason=reason,
+                page_state=page_state,
+                page_type=page_type,
+                confidence=confidence,
+                blocker=blocker,
+            )
             await save_session("stop_state")
             break
 
         # ---- RETRY ----
-        if verdict == "RETRY":
+        if verdict == VisionVerdict.RETRY.value:
             # Bei RETRY den Selektor als fehlgeschlagen merken
             if next_params.get("selector"):
                 gate.add_failed_selector(next_params["selector"])
@@ -2278,6 +2408,33 @@ async def main():
         except Exception:
             pass
 
+        predicate_before_hash = ""
+        predicate_selector = _selector_for_predicate(next_action, next_params)
+        if next_action in CLICK_ACTIONS or next_action == "type_text":
+            try:
+                predicate_pre = await asyncio.to_thread(
+                    predicate_pre_check, BRIDGE_MCP_URL, predicate_selector
+                )
+                predicate_before_hash = predicate_pre.get("dom_hash", "")
+                audit(
+                    "predicate_pre",
+                    step=gate.total_steps,
+                    action=next_action,
+                    selector=predicate_selector,
+                    ok=predicate_pre.get("ok"),
+                    skipped=predicate_pre.get("skipped"),
+                    visible=predicate_pre.get("visible"),
+                    clickable=predicate_pre.get("clickable"),
+                    not_occluded=predicate_pre.get("not_occluded"),
+                    reason=predicate_pre.get("reason"),
+                )
+                if predicate_selector and not predicate_pre.get("ok"):
+                    gate.add_failed_selector(predicate_selector)
+                    await human_delay(1.0, 2.0)
+                    continue
+            except Exception as e:
+                audit("error", message=f"Predicate pre-check failed: {e}")
+
         try:
             # Scroll-Aktionen
             if next_action in ("scroll_down", "scroll_up"):
@@ -2299,6 +2456,10 @@ async def main():
             elif next_action == "type_text":
                 params = {**next_params, **_tab_params()}
                 await execute_bridge("type_text", params)
+
+            # Explizites Warten — nützlich bei Rate-Limits oder nach Auto-Submits
+            elif next_action == "wait":
+                await human_delay(2.0, 5.0)
 
             # Navigation — IMMER mit exaktem tabId, KEIN Fallback ohne tabId
             elif next_action == "navigate":
@@ -2324,8 +2485,29 @@ async def main():
         # DOM-Verifikation prüft URL + Title — ändert sich irgendeins, war es echter Fortschritt.
         # KONSEQUENZ: mark_dom_progress() setzt no_progress_count zurück → kein vorzeitiger Abbruch.
         await asyncio.sleep(1.0)
+
+        predicate_post = None
+        if next_action in CLICK_ACTIONS or next_action == "type_text":
+            try:
+                predicate_post = await asyncio.to_thread(
+                    predicate_post_check, BRIDGE_MCP_URL, predicate_before_hash
+                )
+                audit(
+                    "predicate_post",
+                    step=gate.total_steps,
+                    action=next_action,
+                    selector=predicate_selector,
+                    changed=predicate_post.get("changed"),
+                    new_hash=predicate_post.get("new_hash", "")[:16],
+                )
+            except Exception as e:
+                audit("error", message=f"Predicate post-check failed: {e}")
+
         dom_check = await dom_verify_change(before_url, before_title)
-        if dom_check.get("changed"):
+        dom_changed = dom_check.get("changed") or bool(
+            predicate_post and predicate_post.get("changed")
+        )
+        if dom_changed:
             # DOM hat sich verändert → echter Fortschritt → no_progress_count zurücksetzen
             gate.mark_dom_progress()
             audit(
