@@ -1,0 +1,34 @@
+{
+  "name": "A2A-SIN-Worker-heypiggy",
+  "slug": "a2a-sin-worker-heypiggy",
+  "type": "Worker",
+  "description": "Autonomous HeyPiggy survey worker",
+  "team": "Team Worker",
+  "teamManager": "A2A-SIN-Team-Worker",
+  "primaryModel": "google/antigravity-gemini-3-flash",
+  "capabilities": [
+    "survey_completion",
+    "autonomous_operation"
+  ],
+  "marketplace": {
+    "pricingModel": "subscription",
+    "monthlyPrice": 29.99,
+    "purchaseModes": [
+      "monthly",
+      "annual"
+    ],
+    "category": "worker"
+  },
+  "controlPlane": {
+    "healthEndpoint": "/health",
+    "cardEndpoint": "/.well-known/agent-card.json",
+    "a2aEndpoint": "/a2a/v1"
+  },
+  "deployment": {
+    "workforceIndex": "team-worker",
+    "landingPage": "https://a2a.delqhi.com/agents/a2a-sin-worker-heypiggy",
+    "publicA2A": "https://a2a.delqhi.com/a2a/v1/a2a-sin-worker-heypiggy",
+    "cimdAnchor": "https://a2a.delqhi.com/agents/a2a-sin-worker-heypiggy",
+    "vmServer": "hf-cpu-basic"
+  }
+}
