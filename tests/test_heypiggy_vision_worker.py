@@ -237,6 +237,38 @@ class HeyPiggyWorkerJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision["page_state"], "dashboard")
         self.assertEqual(decision["next_action"], "click_element")
 
+    async def test_ask_vision_includes_fail_learning_context_in_prompt(self):
+        fake_runner = AsyncMock(
+            return_value={
+                "ok": True,
+                "auth_failure": False,
+                "text": json.dumps(
+                    {
+                        "verdict": "PROCEED",
+                        "page_state": "dashboard",
+                        "next_action": "none",
+                        "next_params": {},
+                        "reason": "ok",
+                        "progress": True,
+                    }
+                ),
+            }
+        )
+        with (
+            patch.object(worker, "dom_prescan", AsyncMock(return_value="DOM")),
+            patch.object(
+                worker,
+                "build_fail_learning_context",
+                return_value="RECENT FAIL-LEARNINGS (vermeide diese Muster aktiv):\n- Letzte Root Cause: click failed",
+            ),
+            patch.object(worker, "run_vision_model", fake_runner),
+        ):
+            await worker.ask_vision("/tmp/x.png", "a", "b", 1)
+
+        prompt = fake_runner.await_args.args[0]
+        self.assertIn("RECENT FAIL-LEARNINGS", prompt)
+        self.assertIn("Letzte Root Cause: click failed", prompt)
+
 
 class HeyPiggyWorkerProfilePathTests(unittest.TestCase):
     def test_profile_path_resolver_uses_env_override(self):
@@ -597,6 +629,101 @@ class HeyPiggyFailReplayIntegrationTests(unittest.IsolatedAsyncioTestCase):
         save_report.assert_called_once()
         post_comment.assert_called_once()
 
+    async def test_run_fail_replay_analysis_persists_fail_learning_memory(self):
+        frame = MagicMock()
+        frame.png_bytes = b"frame-bytes"
+        frame.step_label = "step_8_click"
+        frame.vision_verdict = "STOP"
+        frame.page_state = "error"
+        recorder = MagicMock()
+        recorder.get_keyframes.return_value = [frame]
+        run_summary = worker.RunSummary(run_id="run-memory")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_path = pathlib.Path(tmpdir) / "fail_learning.json"
+            with (
+                patch.object(worker, "FAIL_LEARNING_PATH", memory_path),
+                patch.object(
+                    worker,
+                    "save_keyframes_to_disk",
+                    return_value=[pathlib.Path("/tmp/keyframe_00.png")],
+                ),
+                patch.object(worker, "upload_to_box", return_value=None),
+                patch.object(
+                    worker,
+                    "analyze_fail_multiframe",
+                    AsyncMock(
+                        return_value={
+                            "root_cause": "timing race",
+                            "fix_recommendation": "wait longer",
+                            "affected_step": "step 8",
+                            "timing_issue": True,
+                        }
+                    ),
+                ),
+                patch.object(
+                    worker, "generate_fail_report_markdown", return_value="report-body"
+                ),
+                patch.object(
+                    worker,
+                    "save_fail_report_to_disk",
+                    return_value=pathlib.Path("/tmp/fail_report.md"),
+                ),
+            ):
+                await worker._run_fail_replay_analysis(
+                    recorder,
+                    run_summary,
+                    worker.VisionGateController(),
+                    "vision_stop: timing race",
+                    "error",
+                )
+
+            saved = json.loads(memory_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["recent_failures"][-1]["root_cause"], "timing race")
+            self.assertEqual(saved["issue_counts"]["timing_issue"], 1)
+
+
+class HeyPiggyFailLearningMemoryTests(unittest.TestCase):
+    def test_build_fail_learning_context_includes_recent_mitigation_hints(self):
+        memory = {
+            "recent_failures": [
+                {
+                    "root_cause": "selector mismatch",
+                    "fix_recommendation": "use click_ref",
+                    "affected_step": "step 4",
+                }
+            ],
+            "issue_counts": {"selector_issue": 2, "loop_detected": 1},
+        }
+        with patch.object(worker, "load_fail_learning", return_value=memory):
+            context = worker.build_fail_learning_context()
+
+        self.assertIn("selector mismatch", context)
+        self.assertIn("use click_ref", context)
+        self.assertIn("Loop-Muster", context)
+
+    def test_get_fail_learning_delay_bounds_expands_after_timing_failures(self):
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"timing_issue": 1}},
+        ):
+            delay_min, delay_max = worker.get_fail_learning_delay_bounds(5.0, 10.0)
+
+        self.assertEqual((delay_min, delay_max), (6.0, 12.0))
+
+    def test_get_fail_learning_delay_bounds_stays_default_without_timing_failures(self):
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {}},
+        ):
+            delay_min, delay_max = worker.get_fail_learning_delay_bounds(5.0, 10.0)
+
+        self.assertEqual((delay_min, delay_max), (5.0, 10.0))
+
+
+class HeyPiggyFinalizeWorkerRunTests(unittest.IsolatedAsyncioTestCase):
     async def test_finalize_worker_run_skips_fail_replay_for_success(self):
         run_summary = worker.RunSummary(run_id="run-success")
         gate = worker.VisionGateController()

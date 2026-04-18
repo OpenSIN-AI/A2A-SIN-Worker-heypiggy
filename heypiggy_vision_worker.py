@@ -205,6 +205,7 @@ WORKER_CONFIG.artifacts.ensure_dirs()
 CURRENT_RUN_SUMMARY: RunSummary | None = None
 VISION_CIRCUIT_BREAKER = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
 _VISION_CACHE: dict[tuple[str, str], dict[str, object]] = {}
+FAIL_LEARNING_PATH = Path("/tmp/heypiggy_fail_learning.json")
 
 # ============================================================================
 # ANSWER HISTORY — Konsistenz über alle Surveys hinweg (NEU in v3.1)
@@ -245,6 +246,107 @@ def get_consistent_answer(question):
         if question in answers:
             return answers[question]
     return None
+
+
+def load_fail_learning() -> dict[str, object]:
+    if FAIL_LEARNING_PATH.exists():
+        try:
+            with open(FAIL_LEARNING_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+    return {"recent_failures": [], "issue_counts": {}}
+
+
+def save_fail_learning(data: dict[str, object]) -> None:
+    FAIL_LEARNING_PATH.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def remember_fail_learning(
+    analysis: dict[str, object], exit_reason: str, final_page_state: str
+) -> dict[str, object]:
+    memory = load_fail_learning()
+    recent_failures = list(memory.get("recent_failures", []))
+    issue_counts = dict(memory.get("issue_counts", {}))
+
+    issue_flags = {
+        "captcha_detected": bool(analysis.get("captcha_detected")),
+        "timing_issue": bool(analysis.get("timing_issue")),
+        "selector_issue": bool(analysis.get("selector_issue")),
+        "loop_detected": bool(analysis.get("loop_detected")),
+    }
+    for key, enabled in issue_flags.items():
+        if enabled:
+            issue_counts[key] = int(issue_counts.get(key, 0)) + 1
+
+    recent_failures.append(
+        {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "exit_reason": exit_reason,
+            "page_state": final_page_state,
+            "root_cause": str(analysis.get("root_cause", "Unbekannt")),
+            "fix_recommendation": str(analysis.get("fix_recommendation", "N/A")),
+            "affected_step": str(analysis.get("affected_step", "N/A")),
+            "issue_flags": issue_flags,
+        }
+    )
+
+    memory["recent_failures"] = recent_failures[-5:]
+    memory["issue_counts"] = issue_counts
+    save_fail_learning(memory)
+    return memory
+
+
+def build_fail_learning_context() -> str:
+    memory = load_fail_learning()
+    recent_failures = memory.get("recent_failures", [])
+    if not isinstance(recent_failures, list) or not recent_failures:
+        return ""
+
+    last_failure = recent_failures[-1]
+    issue_counts = memory.get("issue_counts", {})
+    if not isinstance(last_failure, dict) or not isinstance(issue_counts, dict):
+        return ""
+
+    lines = ["RECENT FAIL-LEARNINGS (vermeide diese Muster aktiv):"]
+    lines.append(f"- Letzte Root Cause: {last_failure.get('root_cause', 'Unbekannt')}")
+    lines.append(
+        f"- Letzte Fix-Empfehlung: {last_failure.get('fix_recommendation', 'N/A')}"
+    )
+    lines.append(
+        f"- Letzter betroffener Schritt: {last_failure.get('affected_step', 'N/A')}"
+    )
+    if int(issue_counts.get("timing_issue", 0)) > 0:
+        lines.append(
+            "- Timing-Issues kamen bereits vor: klicke nicht zu früh, prüfe Sichtbarkeit/DOM-Änderung vor Wiederholung."
+        )
+    if int(issue_counts.get("selector_issue", 0)) > 0:
+        lines.append(
+            "- Selector-Issues kamen bereits vor: bevorzuge click_ref, #id oder bestätigte DOM-Selektoren statt generischer Targets."
+        )
+    if int(issue_counts.get("loop_detected", 0)) > 0:
+        lines.append(
+            "- Loop-Muster kamen bereits vor: wiederhole nicht dieselbe Aktion auf demselben Screen ohne neue Evidenz."
+        )
+    if int(issue_counts.get("captcha_detected", 0)) > 0:
+        lines.append(
+            "- Captchas kamen bereits vor: priorisiere Captcha-Erkennung vor Survey-Interaktionen."
+        )
+    return "\n".join(lines)
+
+
+def get_fail_learning_delay_bounds(
+    min_sec: float, max_sec: float
+) -> tuple[float, float]:
+    memory = load_fail_learning()
+    issue_counts = memory.get("issue_counts", {})
+    if isinstance(issue_counts, dict) and int(issue_counts.get("timing_issue", 0)) > 0:
+        return min_sec + 1.0, max_sec + 2.0
+    return min_sec, max_sec
 
 
 # ============================================================================
@@ -1602,6 +1704,7 @@ async def ask_vision(
     # WHY: Gemini muss wissen wer der User ist um Profil-Fragen korrekt zu beantworten.
     #      Ohne Profil würde Gemini zufällig wählen → falsche Region, falscher Name etc.
     profile_context = _build_profile_context()
+    fail_learning_context = build_fail_learning_context()
 
     prompt = f"""Du bist der Vision Gate Controller der OpenSIN-Bridge.
 
@@ -1611,6 +1714,8 @@ KONTEXT:
 - Schritt Nummer: {step_num} von maximal {MAX_STEPS}
 
 {profile_context}
+
+{fail_learning_context}
 
 {dom_context}
 
@@ -2636,6 +2741,7 @@ async def _run_fail_replay_analysis(
         keyframe_urls=keyframe_urls,
     )
     report_path = save_fail_report_to_disk(report_md, analysis, output_dir, RUN_ID)
+    remember_fail_learning(analysis, exit_reason, final_page_state)
 
     repo = os.environ.get("FAIL_REPORT_REPO", "")
     issue_number = os.environ.get("FAIL_REPORT_ISSUE_NUMBER", "")
@@ -2857,7 +2963,8 @@ async def main():
 
         # THROTTLE: Vor Vision-Calls länger warten um Rate-Limit zu vermeiden
         # WHY: Antigravity hat Rate-Limits; zu schnelle Calls führen zu leeren Antworten.
-        await human_delay(5.0, 10.0)
+        delay_min, delay_max = get_fail_learning_delay_bounds(5.0, 10.0)
+        await human_delay(delay_min, delay_max)
 
         # ---- VISION CHECK ----
         decision = await ask_vision(img_path, action_desc, expected, current_step)
