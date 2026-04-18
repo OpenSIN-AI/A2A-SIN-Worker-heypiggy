@@ -1430,6 +1430,36 @@ def normalize_selector(selector: str) -> str:
     return cleaned
 
 
+def extract_accessibility_ref(value: str) -> str:
+    if not value:
+        return ""
+
+    match = re.search(r"@e\d+", value)
+    if not match:
+        return ""
+    return match.group(0)
+
+
+async def execute_type_text_action(next_params: dict[str, object]) -> None:
+    params = {**next_params, **_tab_params()}
+    selector = str(params.get("selector", ""))
+    explicit_ref = str(params.get("ref", ""))
+    ref = extract_accessibility_ref(explicit_ref or selector)
+
+    if ref:
+        await execute_bridge("click_ref", {"ref": ref, **_tab_params()})
+        await asyncio.sleep(0.5)
+        text = str(params.get("text", ""))
+        if text:
+            await keyboard_action(list(text))
+        return
+
+    normalized_selector = normalize_selector(selector)
+    if normalized_selector:
+        params["selector"] = normalized_selector
+    await execute_bridge("type_text", params)
+
+
 async def click_visible_button_with_text(text_hint: str):
     """
     Klicke einen sichtbaren Button anhand seines Textinhalts.
@@ -3480,22 +3510,7 @@ async def main():
 
             # Text-Eingabe — IMMER mit exaktem tabId
             elif next_action == "type_text":
-                params = {**next_params, **_tab_params()}
-                selector = params.get("selector", "")
-                # If selector looks like an accessibility ref (e.g., "@e19"), use click_ref + keyboard
-                if selector and (selector.startswith("@") or "@e" in selector):
-                    # Extract ref
-                    ref = selector
-                    # Focus the element via click_ref
-                    await execute_bridge("click_ref", {"ref": ref, **_tab_params()})
-                    await asyncio.sleep(0.5)
-                    # Type using keyboard (focus already on element)
-                    text = params.get("text", "")
-                    await execute_bridge(
-                        "keyboard", {"keys": list(text), **_tab_params()}
-                    )
-                else:
-                    await execute_bridge("type_text", params)
+                await execute_type_text_action(next_params)
 
             # Navigation — IMMER mit exaktem tabId, KEIN Fallback ohne tabId
             elif next_action == "navigate":

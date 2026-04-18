@@ -715,6 +715,74 @@ class HeyPiggyProfileAutofillTests(unittest.TestCase):
             self.assertIsNone(worker._resolve_profile_value("some-random-field"))
 
 
+class HeyPiggyAccessibilityRefTests(unittest.IsolatedAsyncioTestCase):
+    def test_extract_accessibility_ref_returns_clean_ref_from_labelled_text(self):
+        self.assertEqual(worker.extract_accessibility_ref("textbox @e19"), "@e19")
+        self.assertEqual(worker.extract_accessibility_ref("radio option @e7"), "@e7")
+
+    def test_extract_accessibility_ref_returns_empty_when_missing(self):
+        self.assertEqual(worker.extract_accessibility_ref("#email"), "")
+        self.assertEqual(worker.extract_accessibility_ref(""), "")
+
+    async def test_execute_type_text_action_uses_clean_ref_and_keyboard_for_accessibility_selector(
+        self,
+    ):
+        fake_bridge = AsyncMock(return_value={"ok": True})
+        fake_keyboard = AsyncMock()
+
+        with (
+            patch.object(worker, "CURRENT_TAB_ID", 101),
+            patch.object(worker, "execute_bridge", fake_bridge),
+            patch.object(worker, "keyboard_action", fake_keyboard),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            await worker.execute_type_text_action(
+                {"selector": "textbox @e19", "text": "hello"}
+            )
+
+        self.assertEqual(fake_bridge.await_count, 1)
+        self.assertEqual(fake_bridge.await_args.args[0], "click_ref")
+        self.assertEqual(fake_bridge.await_args.args[1]["ref"], "@e19")
+        fake_keyboard.assert_awaited_once_with(list("hello"))
+
+    async def test_execute_type_text_action_uses_explicit_ref_when_present(self):
+        fake_bridge = AsyncMock(return_value={"ok": True})
+        fake_keyboard = AsyncMock()
+
+        with (
+            patch.object(worker, "CURRENT_TAB_ID", 101),
+            patch.object(worker, "execute_bridge", fake_bridge),
+            patch.object(worker, "keyboard_action", fake_keyboard),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            await worker.execute_type_text_action(
+                {"selector": "textbox @e19", "ref": "field @e22", "text": "abc"}
+            )
+
+        self.assertEqual(fake_bridge.await_args.args[1]["ref"], "@e22")
+        fake_keyboard.assert_awaited_once_with(list("abc"))
+
+    async def test_execute_type_text_action_falls_back_to_type_text_for_css_selector(
+        self,
+    ):
+        fake_bridge = AsyncMock(return_value={"ok": True})
+        fake_keyboard = AsyncMock()
+
+        with (
+            patch.object(worker, "CURRENT_TAB_ID", 101),
+            patch.object(worker, "execute_bridge", fake_bridge),
+            patch.object(worker, "keyboard_action", fake_keyboard),
+        ):
+            await worker.execute_type_text_action(
+                {"selector": ".email-input", "text": "hello"}
+            )
+
+        self.assertEqual(fake_bridge.await_count, 1)
+        self.assertEqual(fake_bridge.await_args.args[0], "type_text")
+        self.assertEqual(fake_bridge.await_args.args[1]["selector"], ".email-input")
+        fake_keyboard.assert_not_called()
+
+
 class HeyPiggyFailReplayIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_fail_replay_analysis_writes_report_and_optional_comment(self):
         frame = MagicMock()
