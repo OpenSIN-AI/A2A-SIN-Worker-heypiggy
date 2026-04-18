@@ -64,6 +64,23 @@ from fail_report import (
 )
 from nvidia_video_analyzer import analyze_fail_multiframe
 from observability import RunSummary
+from worker.bridge_contract import BridgeRequest, call_bridge_with_retry
+from worker.checkpoints import (
+    AgentState,
+    StepContext,
+    archive_run_bundle,
+    checkpoint_path,
+    clear_checkpoint,
+    escalate,
+    fail_safe,
+    find_latest_checkpoint,
+    list_recent_archives,
+    load_checkpoint,
+    save_checkpoint,
+    step_context_advance,
+)
+from worker.sitepack import SitepackLoader
+from worker.exceptions import BridgeUnavailableError
 
 # Import typed state machine for page state tracking
 from state_machine import page_state_machine
@@ -109,6 +126,33 @@ def _load_user_profile() -> dict:
 
 
 USER_PROFILE = _load_user_profile()
+
+
+def sitepack_selector(name: str) -> str:
+    return SITEPACK_LOADER.get_selector(name)
+
+
+def sitepack_flow(name: str) -> list[str]:
+    return SITEPACK_LOADER.get_flow(name)
+
+
+def sitepack_page_signature(name: str) -> list[str]:
+    return SITEPACK_LOADER.get_page_signature(name)
+
+
+def build_sitepack_context() -> str:
+    login_signature = ", ".join(sitepack_page_signature("login"))
+    dashboard_signature = ", ".join(sitepack_page_signature("dashboard"))
+    survey_signature = ", ".join(sitepack_page_signature("survey_active"))
+    return (
+        "SITEPACK-KONTEXT:\n"
+        f"- login_url: {sitepack_flow('login')[0]}\n"
+        f"- consent_next: {sitepack_selector('consent_next')}\n"
+        f"- survey_card: {sitepack_selector('survey_card')}\n"
+        f"- login_signatures: {login_signature}\n"
+        f"- dashboard_signatures: {dashboard_signature}\n"
+        f"- survey_signatures: {survey_signature}"
+    )
 
 
 def _build_profile_context() -> str:
@@ -159,6 +203,9 @@ def _build_profile_context() -> str:
 # ============================================================================
 
 WORKER_CONFIG = load_config_from_env()
+SITEPACK_PATH = Path(__file__).resolve().parent / "sitepacks" / "heypiggy" / "v1" / "pack.json"
+SITEPACK_LOADER = SitepackLoader()
+SITEPACK = SITEPACK_LOADER.load(SITEPACK_PATH)
 
 # Bridge-Endpunkte
 BRIDGE_MCP_URL = WORKER_CONFIG.bridge.mcp_url
@@ -198,6 +245,8 @@ ARTIFACT_DIR = WORKER_CONFIG.artifacts.artifact_dir
 SCREENSHOT_DIR = WORKER_CONFIG.artifacts.screenshot_dir
 AUDIT_DIR = WORKER_CONFIG.artifacts.audit_dir
 SESSION_DIR = WORKER_CONFIG.artifacts.session_dir
+ARTIFACT_BASE_DIR = Path(WORKER_CONFIG.artifacts.base_dir)
+CHECKPOINT_PATH = checkpoint_path(ARTIFACT_DIR)
 
 # Erstelle alle Verzeichnisse beim Start
 WORKER_CONFIG.artifacts.ensure_dirs()
@@ -205,6 +254,19 @@ WORKER_CONFIG.artifacts.ensure_dirs()
 CURRENT_RUN_SUMMARY: RunSummary | None = None
 VISION_CIRCUIT_BREAKER = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
 _VISION_CACHE: dict[tuple[str, str], dict[str, object]] = {}
+CURRENT_PAGE_FINGERPRINT = ""
+VISION_VERDICTS = {"PROCEED", "STOP", "RETRY", "ESCALATE"}
+VISION_PAGE_STATES = {
+    "dashboard",
+    "login",
+    "onboarding",
+    "survey",
+    "survey_active",
+    "survey_done",
+    "captcha",
+    "error",
+    "unknown",
+}
 FAIL_LEARNING_PATH = Path("/tmp/heypiggy_fail_learning.json")
 FAIL_KEYWORD_STOPWORDS = {
     "after",
@@ -1309,7 +1371,7 @@ async def wait_for_extension(timeout=600):
     raise RuntimeError(f"Timeout ({timeout}s): Bridge Extension nicht verbunden.")
 
 
-def post_mcp(method: str, params: dict = None):
+def post_mcp(method: str, params: dict[str, object] | None = None):
     """
     Sendet einen MCP-Request an die Bridge mit 3x Retry und Error-Body-Parsing.
     WHY: Die Bridge kann kurzzeitig 500er liefern, das darf nicht zum Crash führen.
@@ -1317,46 +1379,15 @@ def post_mcp(method: str, params: dict = None):
     """
     global request_id_counter
     request_id_counter += 1
-
-    body = {"jsonrpc": "2.0", "method": method, "id": request_id_counter}
-    if params:
-        body["params"] = params
-
-    last_err = None
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(
-                BRIDGE_MCP_URL,
-                data=json.dumps(body).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                decoded = json.loads(resp.read().decode("utf-8"))
-                if "error" in decoded:
-                    last_err = f"MCP Protocol Error: {decoded['error']}"
-                    audit("error", message=last_err, attempt=attempt + 1)
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                return decoded.get("result", {})
-
-        except urllib.error.HTTPError as e:
-            # Echten Error-Body extrahieren statt nur Status-Code
-            try:
-                error_body = e.read().decode("utf-8")
-                error_json = json.loads(error_body)
-                last_err = f"HTTP {e.code}: {json.dumps(error_json)}"
-            except Exception:
-                last_err = f"HTTP {e.code}: {e.reason}"
-            audit("error", message=last_err, attempt=attempt + 1)
-            time.sleep(2 * (attempt + 1))
-
-        except Exception as e:
-            last_err = str(e)
-            audit("error", message=last_err, attempt=attempt + 1)
-            time.sleep(2 * (attempt + 1))
-
-    raise RuntimeError(f"MCP fehlgeschlagen nach 3 Versuchen: {last_err}")
+    request = BridgeRequest(
+        method=method,
+        params=params or {},
+        page_fingerprint=CURRENT_PAGE_FINGERPRINT,
+        timeout_seconds=30,
+        request_id=request_id_counter,
+    )
+    response = call_bridge_with_retry(BRIDGE_MCP_URL, request)
+    return response.result
 
 
 def decode_mcp_result(raw):
@@ -1430,10 +1461,11 @@ async def click_visible_button_with_text(text_hint: str):
     """
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
+    button_candidates = sitepack_selector("primary_buttons")
     js_code = f"""
     (function() {{
       const hint = {json.dumps(text_hint.lower())};
-      const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+      const candidates = Array.from(document.querySelectorAll({json.dumps(button_candidates)}));
       const el = candidates.find((node) => {{
         const text = (node.textContent || '').trim().toLowerCase();
         const visible = node.offsetParent !== null;
@@ -1466,33 +1498,25 @@ async def detect_captcha_page() -> bool:
     """Erkennt Captcha-Präsenz via DOM-Scan."""
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
-    js_code = """
-    (function() {
-        var captchaSelectors = [
-            '.recaptcha-checkbox', '.g-recaptcha', '#recaptcha-anchor',
-            'iframe[src*="recaptcha"]', '[title="reCAPTCHA"]',
-            '.h-captcha', 'iframe[src*="hcaptcha"]',
-            '.cf-turnstile', 'iframe[src*="turnstile"]',
-            '.captcha-checkbox', '[class*="captcha"]',
-            '[class*="verify"][class*="human"]'
-        ];
-        for (var i = 0; i < captchaSelectors.length; i++) {
-            var els = document.querySelectorAll(captchaSelectors[i]);
-            for (var j = 0; j < els.length; j++) {
-                if (els[j].offsetParent !== null) {
-                    return {found: true, selector: captchaSelectors[i], index: j};
-                }
-            }
-        }
+    captcha_presence_selector = sitepack_selector("captcha_presence")
+    captcha_keywords = sitepack_page_signature("captcha")
+    js_code = f"""
+    (function() {{
+        var els = document.querySelectorAll({json.dumps(captcha_presence_selector)});
+        for (var j = 0; j < els.length; j++) {{
+            if (els[j].offsetParent !== null) {{
+                return {{found: true, selector: {json.dumps(captcha_presence_selector)}, index: j}};
+            }}
+        }}
         var text = (document.body.textContent || '').toLowerCase();
-        var captchaTexts = ['i am not a robot', 'ich bin kein robot', 'verify you are human', 'security check', 'captcha'];
-        for (var i = 0; i < captchaTexts.length; i++) {
-            if (text.includes(captchaTexts[i])) {
-                return {found: true, type: 'text_match', keyword: captchaTexts[i]};
-            }
-        }
-        return {found: false};
-    })();
+        var captchaTexts = {json.dumps(captcha_keywords)};
+        for (var i = 0; i < captchaTexts.length; i++) {{
+            if (text.includes(captchaTexts[i])) {{
+                return {{found: true, type: 'text_match', keyword: captchaTexts[i]}};
+            }}
+        }}
+        return {{found: false}};
+    }})();
     """
     result = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
     if isinstance(result, dict):
@@ -1511,35 +1535,29 @@ async def handle_captcha() -> bool:
         return False
     _captcha_attempt_count += 1
     tab_params = _tab_params()
-    js_code = """
-    (function() {
-        var checkboxSelectors = [
-            '.recaptcha-checkbox', '#recaptcha-anchor',
-            '.captcha-checkbox', '[title="reCAPTCHA"]',
-            '[class*="recaptcha"][class*="checkbox"]'
-        ];
-        for (var i = 0; i < checkboxSelectors.length; i++) {
-            var els = document.querySelectorAll(checkboxSelectors[i]);
-            for (var j = 0; j < els.length; j++) {
-                var el = els[j];
-                if (el.offsetParent !== null) {
-                    if (typeof el.click === 'function') el.click();
-                    else el.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true,view:window}));
-                    return {clicked: true, selector: checkboxSelectors[i], type: 'checkbox'};
-                }
-            }
-        }
-        var refreshBtns = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-        var refresh = refreshBtns.find(function(b) {
+    captcha_checkbox_selector = sitepack_selector("captcha_checkbox_targets")
+    js_code = f"""
+    (function() {{
+        var els = document.querySelectorAll({json.dumps(captcha_checkbox_selector)});
+        for (var j = 0; j < els.length; j++) {{
+            var el = els[j];
+            if (el.offsetParent !== null) {{
+                if (typeof el.click === 'function') el.click();
+                else el.dispatchEvent(new MouseEvent('click', {{bubbles:true,cancelable:true,view:window}}));
+                return {{clicked: true, selector: {json.dumps(captcha_checkbox_selector)}, type: 'checkbox'}};
+            }}
+        }}
+        var refreshBtns = Array.from(document.querySelectorAll({json.dumps(sitepack_selector("primary_buttons"))}));
+        var refresh = refreshBtns.find(function(b) {{
             var t = (b.textContent || '').toLowerCase();
             return t.includes('refresh') || t.includes('reload') || t.includes('neues') || t.includes('anderes');
-        });
-        if (refresh) {
+        }});
+        if (refresh) {{
             refresh.click();
-            return {refreshed: true, type: 'refresh'};
-        }
-        return {action: 'none'};
-    })();
+            return {{refreshed: true, type: 'refresh'}};
+        }}
+        return {{action: 'none'}};
+    }})();
     """
     result = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
     audit("captcha", attempt=_captcha_attempt_count, result=str(result)[:200])
@@ -1562,17 +1580,18 @@ async def resolve_survey_selector(selector: str, description: str = "") -> str:
     if not selector:
         return selector
 
+    survey_card_selector = sitepack_selector("survey_card")
     lowered = selector.lower()
-    if "survey-item" not in lowered and "survey" not in lowered:
+    if survey_card_selector.split(".")[-1] not in lowered and "survey" not in lowered:
         return selector
 
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
-    js_code = """
-    (function() {
-      const cards = Array.from(document.querySelectorAll('div.survey-item')).map((el) => {
+    js_code = f"""
+    (function() {{
+      const cards = Array.from(document.querySelectorAll({json.dumps(survey_card_selector)})).map((el) => {{
         const r = el.getBoundingClientRect();
-        return {
+        return {{
           id: el.id || '',
           text: (el.textContent || '').replace(/\\s+/g, ' ').trim(),
           visible: el.offsetParent !== null,
@@ -1580,10 +1599,10 @@ async def resolve_survey_selector(selector: str, description: str = "") -> str:
           y: Math.round(r.top + r.height / 2),
           w: Math.round(r.width),
           h: Math.round(r.height),
-        };
-      });
+        }};
+      }});
       return cards.filter((card) => card.visible && card.id);
-    })();
+    }})();
     """
     scan = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
     cards = []
@@ -1764,6 +1783,8 @@ async def execute_bridge(method: str, params: dict[str, object] | None = None):
                     result = decode_mcp_result(retry_raw)
 
         return result
+    except BridgeUnavailableError:
+        raise
     except Exception as e:
         audit("error", message=f"execute_bridge({method}) failed: {e}")
         return {"error": str(e)}
@@ -1895,22 +1916,33 @@ async def dom_prescan():
     # 2. Echte HTML-Elemente mit Klick-Potential scannen
     clickable_info = ""
     try:
-        js_scan = """
-        (function() {
+        dom_scan_selector = ", ".join(
+            [
+                "[onclick]",
+                sitepack_selector("primary_buttons"),
+                sitepack_selector("survey_card"),
+                sitepack_selector("survey_card_alt"),
+                sitepack_selector("survey_clickable"),
+                "[class*='card']",
+                "[class*='survey']",
+            ]
+        )
+        js_scan = f"""
+        (function() {{
             var results = [];
-            var all = document.querySelectorAll('[onclick], [role="button"], a[href], button, input[type="submit"], [style*="cursor: pointer"], .survey-item, .survey-card, [class*="card"], [class*="survey"]');
-            for (var i = 0; i < Math.min(all.length, 25); i++) {
+            var all = document.querySelectorAll({json.dumps(dom_scan_selector)});
+            for (var i = 0; i < Math.min(all.length, 25); i++) {{
                 var el = all[i];
                 var r = el.getBoundingClientRect();
                 if (r.width < 5 || r.height < 5) continue;
                 var sel = '';
                 if (el.id) sel = '#' + el.id;
-                else if (el.className && typeof el.className === 'string') {
-                    var cls = el.className.split(' ').filter(function(c) { return c.length > 0; })[0];
+                else if (el.className && typeof el.className === 'string') {{
+                    var cls = el.className.split(' ').filter(function(c) {{ return c.length > 0; }})[0];
                     if (cls) sel = el.tagName.toLowerCase() + '.' + cls;
-                }
+                }}
                 if (!sel) sel = el.tagName.toLowerCase();
-                results.push({
+                results.push({{
                     sel: sel,
                     tag: el.tagName,
                     id: el.id || '',
@@ -1921,10 +1953,10 @@ async def dom_prescan():
                     w: Math.round(r.width),
                     h: Math.round(r.height),
                     cursor: getComputedStyle(el).cursor
-                });
-            }
+                }});
+            }}
             return results;
-        })();
+        }})();
         """
         scan_result = await execute_bridge("execute_javascript", {"script": js_scan, **tab_params})
         if isinstance(scan_result, dict) and "result" in scan_result:
@@ -1994,6 +2026,126 @@ def _vision_cache_put(
     audit("vision_cache_store", step=step_num, hash=screenshot_hash[:8])
 
 
+def build_vision_prompt(
+    action_desc: str,
+    expected: str,
+    dom_snapshot: str,
+    *,
+    step_num: int,
+    profile_context: str = "",
+    fail_learning_context: str = "",
+) -> str:
+    return f"""Du bist der Vision Gate Controller der OpenSIN-Bridge.
+
+KONTEXT:
+- Letzte Aktion: '{action_desc}'
+- Erwartetes Ergebnis: '{expected}'
+- Schritt Nummer: {step_num} von maximal {MAX_STEPS}
+
+{profile_context}
+
+{fail_learning_context}
+
+{dom_snapshot}
+
+Analysiere Screenshot und DOM-Daten.
+Antworte AUSSCHLIESSLICH mit gültigem JSON ohne Markdown-Fences.
+
+Schema:
+{{
+  "verdict": "PROCEED|STOP|RETRY|ESCALATE",
+  "page_state": "dashboard|login|onboarding|survey|survey_active|survey_done|captcha|error|unknown",
+  "reason": "Kurze Analyse...",
+  "progress": true,
+  "next_action": "click_element|click_ref|ghost_click|vision_click|click_coordinates|keyboard|type_text|navigate|scroll_down|scroll_up|none",
+  "next_params": {{}}
+}}"""
+
+
+def _strip_markdown_fences(raw_text: str) -> str:
+    text = raw_text.strip()
+    if "```json" in text:
+        text = text.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in text:
+        parts = text.split("```")
+        if len(parts) >= 3:
+            text = parts[1].strip()
+            if text.startswith("json"):
+                text = text[4:].strip()
+    if text and not text.lstrip().startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start : end + 1]
+    return text
+
+
+def _validate_vision_decision(result: dict[str, object]) -> dict[str, object]:
+    verdict = str(result.get("verdict", "RETRY")).upper()
+    page_state = str(result.get("page_state", "unknown")).lower()
+    next_action = str(result.get("next_action", "none"))
+    next_params = result.get("next_params", {})
+    if verdict not in VISION_VERDICTS:
+        raise ValueError(f"invalid verdict: {verdict}")
+    if page_state not in VISION_PAGE_STATES:
+        raise ValueError(f"invalid page_state: {page_state}")
+    if not isinstance(next_params, dict):
+        raise ValueError("next_params must be dict")
+    return {
+        "verdict": verdict,
+        "page_state": page_state,
+        "reason": str(result.get("reason", "")),
+        "progress": bool(result.get("progress", False)),
+        "next_action": next_action,
+        "next_params": next_params,
+    }
+
+
+def parse_vision_response(raw_text: str) -> dict[str, object]:
+    cleaned = _strip_markdown_fences(raw_text)
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\b(PROCEED|STOP|RETRY|ESCALATE)\b", raw_text.upper())
+        if match:
+            return {
+                "verdict": match.group(1),
+                "page_state": "unknown",
+                "reason": "text fallback verdict extraction",
+                "progress": False,
+                "next_action": "none",
+                "next_params": {},
+            }
+        return {
+            "verdict": "RETRY",
+            "page_state": "unknown",
+            "reason": "complete parse failure",
+            "progress": False,
+            "next_action": "none",
+            "next_params": {},
+        }
+    if not isinstance(payload, dict):
+        return {
+            "verdict": "RETRY",
+            "page_state": "unknown",
+            "reason": "parsed payload was not an object",
+            "progress": False,
+            "next_action": "none",
+            "next_params": {},
+        }
+    try:
+        return _validate_vision_decision(payload)
+    except ValueError as exc:
+        return {
+            "verdict": "RETRY",
+            "page_state": "unknown",
+            "reason": str(exc),
+            "progress": False,
+            "next_action": "none",
+            "next_params": {},
+        }
+
+
 async def ask_vision(screenshot_path: str, action_desc: str, expected: str, step_num: int):
     """
     Sendet einen Screenshot + DOM-Kontext an Gemini 3 Flash.
@@ -2018,123 +2170,16 @@ async def ask_vision(screenshot_path: str, action_desc: str, expected: str, step
     #      Ohne Profil würde Gemini zufällig wählen → falsche Region, falscher Name etc.
     profile_context = _build_profile_context()
     fail_learning_context = build_fail_learning_context()
+    sitepack_context = build_sitepack_context()
 
-    prompt = f"""Du bist der Vision Gate Controller der OpenSIN-Bridge.
-
-KONTEXT:
-- Letzte Aktion: '{action_desc}'
-- Erwartetes Ergebnis: '{expected}'
-- Schritt Nummer: {step_num} von maximal {MAX_STEPS}
-
-{profile_context}
-
-{fail_learning_context}
-
-{dom_context}
-
-AUFGABE — Analysiere den Screenshot UND die DOM-Daten oben PRÄZISE:
-
-1. BLOCKIERUNGEN: Sind Captchas, Cookie-Banner, Consent-Modals, Login-Dialoge, Popups, Overlays oder Error-Messages sichtbar?
-   → Wenn ja: Diese ZUERST schliessen/akzeptieren!
-
-2. AKTUELLER STATUS: Was zeigt die Seite GENAU an?
-
-3. FORTSCHRITT: Hat sich gegenüber der letzten Aktion etwas verändert?
-
-4. NÄCHSTE AKTION: Was muss als nächstes passieren?
-
-VERFÜGBARE AKTIONEN (wähle GENAU EINE):
-- "click_element" — Standard CSS-Selektor Klick. Params: {{"selector": "#id-oder-.klasse"}}
-- "click_ref" — Klick per Accessibility-Tree-Ref (z.B. @e9). BEVORZUGT für Radio-Buttons, Checkboxen, Links ohne ID! Params: {{"ref": "@e9"}}
-- "ghost_click" — Voller Pointer+Mouse Event-Stack für SPA/React-Elemente. Params: {{"selector": "#echte-id"}}
-- "vision_click" — Beschreibungsbasierter Klick. Params: {{"description": "Text des Elements"}}
-- "click_coordinates" — Absoluter Pixel-Klick. Params: {{"x": 100, "y": 200}}
-- "keyboard" — Tastatur verwenden (z.B. Tab, Enter). Params: {{"keys": ["Enter"], "selector": "#optional-id"}}
-- "type_text" — Text eingeben. Params: {{"selector": "css", "text": "wert"}}
-- "navigate" — URL aufrufen. Params: {{"url": "https://..."}}
-- "scroll_down" — Seite nach unten scrollen
-- "scroll_up" — Seite nach oben scrollen
-- "none" — Aufgabe erledigt, nichts mehr zu tun
-
-ABSOLUTE PFLICHT-REGELN FÜR SELEKTOREN:
-- NUTZE NUR Selektoren aus der DOM-Analyse oben! NIEMALS raten!
-- Pseudo-Selektoren wie :has-text(), :contains(), :has() sind VERBOTEN (existieren nicht in CSS)!
-- Bevorzuge #id Selektoren (z.B. #survey-65076903) — die sind IMMER eindeutig!
-- WICHTIG: input[type='radio'][value='X'] NIEMALS nutzen — HeyPiggy Radio-Buttons haben KEINE value= Attribute!
-- Für Radio-Buttons → IMMER click_ref mit dem @eX Ref aus dem ACCESSIBILITY-TREE oben nutzen!
-- Für Survey-Karten auf HeyPiggy: Die Klasse ist .survey-item (NICHT .survey-card!), jede Karte hat eine eindeutige ID wie #survey-XXXXXXXX
-- Nutze ghost_click für alle div-basierten Karten (cursor: pointer)
-- Playwright-only Texte-Selektoren wie :contains(), :has-text() oder :text() sind VERBOTEN.
-- Wenn du Textreferenz brauchst, nenne den echten CSS-Selektor aus dem DOM-Pre-Scan oder eine eindeutige #id.
-- CONSENT-MODAL "Nächste" Button: IMMER #submit-button-cpx nutzen! NIEMALS button.modal-button-positive — das trifft dutzende versteckte Buttons im DOM und funktioniert nicht!
-
-KLICK-STRATEGIE:
-- Für Radio-Buttons ([radio @eX] im Accessibility-Tree) → click_ref mit {{"ref": "@eX"}} — das ist PFLICHT!
-- Für <button>, <a>, <input> → click_element
-- Für div.survey-item / div[cursor=pointer] → ghost_click mit #id-Selektor
-- Für Elemente ohne CSS-Selektor → vision_click mit Beschreibung
-- Letzter Ausweg → click_coordinates mit x,y aus der DOM-Analyse
-
-PAGE STATE REGELN — KRITISCH:
-- "dashboard" → HeyPiggy Startseite mit Survey-Liste, noch keine Umfrage gestartet
-- "login" → Login-Formular sichtbar
-- "onboarding" → Profil-Modal/Onboarding-Fragen (Region, Name, etc.) — VOR dem eigentlichen Dashboard!
-- "survey_active" → UMFRAGE LÄUFT GERADE! Fragen werden angezeigt (Radio-Buttons, Dropdowns, Textfelder, Skalen). NIEMALS "none" zurückgeben solange Fragen sichtbar sind!
-- "survey" → Survey-Auswahl / Übergangsseite (zwischen Dashboard und aktiver Umfrage)
-- "survey_done" → Umfrage erfolgreich abgeschlossen, Bestätigungsseite
-- "error" → Fehlermeldung, Timeout oder unbekannter Zustand
-- "unknown" → Seite nicht klar erkennbar
-
-PROFIL-FRAGEN REGELN — KRITISCH:
-- Wenn ein Modal mit Profil-Fragen sichtbar ist (Region, Wohnort, Geschlecht, Name, Alter etc.):
-  page_state="onboarding" setzen!
-- Nutze IMMER das BENUTZERPROFIL oben um die korrekte Antwort zu wählen!
-- Region-Frage ("In welcher Region wohnst du?"): IMMER "Norden" wählen (Jeremy wohnt in Berlin, wählt Norden)
-- Nach Auswahl der Antwort → "Nächste"/"Weiter" Button klicken!
-- Profil-Modals MÜSSEN vollständig ausgefüllt werden bevor Umfragen gestartet werden!
-
-UMFRAGE-REGELN — ABSOLUT KRITISCH:
-- Wenn page_state="survey_active": BEENDE DIE UMFRAGE VOLLSTÄNDIG! Klicke ALLE Fragen durch bis zur Bestätigungsseite!
-- Wenn eine Frage sichtbar ist → IMMER beantworten und "Weiter"/"Next"/"Submit" klicken!
-- NIEMALS next_action="none" wenn noch Fragen offen sind!
-- Radio-Button Fragen → click_ref mit dem @eX Ref aus dem Accessibility-Tree (NICHT click_element mit value=!)
-- Dropdown-Fragen → click_element auf die gewünschte Option
-- Freitext-Fragen → type_text mit einer sinnvollen Antwort
-- Skalen-Fragen (1-5, 1-7, etc.) → click_element auf mittlere oder positive Option
-- "Weiter"/"Next"/"Fortfahren"/"Continue"/"Submit" Buttons → IMMER klicken nach einer Antwort!
-- Fortschrittsbalken sichtbar? → Umfrage läuft noch, page_state="survey_active"!
-
-CAPTCHA-ERKENNUNG — KRITISCH:
-- Captcha-Checkbox sichtbar ("I am not a robot" / "Ich bin kein Roboter") → page_state="captcha" setzen!
-- Captcha-Checkbox → click_ref mit dem @eX Ref aus dem Accessibility-Tree!
-- Bilderauswahl-Captcha → Vision erkennt die richtigen Bilder und klickt sie!
-- Bei Captcha: NIEMALS verdict="STOP"! Captchas können gelöst werden!
-
-ANTWORT-KONSISTENZ — RAUSFLUG-VERMEIDUNG:
-- Vergleiche aktuelle Frage mit BENUTZERPROFIL und FRÜHEREN ANTWORTEN oben!
-- Gleiche Frage → GLEICHE Antwort wie früher!
-- Profil-Fragen (Alter, Geschlecht, Region) → IMMER aus BENUTZERPROFIL!
-- Widersprüchliche Antworten = Rausflug-Gefahr = VERMEIDEN!
-- "None of the above" NUR wenn wirklich keine Option passt!
-- Mittlere/positive Optionen bevorzugen bei Skalenfragen!
-
-REGELN:
-- Antworte AUSSCHLIESSLICH mit gültigem JSON! Kein Markdown, kein Text!
-- Bei Captchas: page_state="captcha" und click_ref auf Checkbox! NICHT STOP!
-- Nur bei unlösbaren Blockierungen (kein Captcha): verdict="STOP"
-- Bei unveränderter Seite: verdict="RETRY" und schlage eine ANDERE Methode vor!
-- Credentials NIEMALS ausgeben! Nutze "<EMAIL>" und "<PASSWORD>" als Platzhalter.
-- Wähle IMMER die lukrativste verfügbare Umfrage (höchster €-Betrag)!
-
-ANTWORT-FORMAT (NUR dieses JSON, NICHTS anderes):
-{{
-  "verdict": "PROCEED",
-  "page_state": "dashboard|login|onboarding|survey|survey_active|survey_done|error|unknown",
-  "reason": "Kurze Analyse...",
-  "progress": true,
-  "next_action": "click_ref",
-  "next_params": {{"ref": "@e9"}}
-}}"""
+    prompt = build_vision_prompt(
+        action_desc,
+        expected,
+        "\n\n".join(filter(None, [sitepack_context, dom_context])),
+        step_num=step_num,
+        profile_context=profile_context,
+        fail_learning_context=fail_learning_context,
+    )
 
     run_result = await run_vision_model(
         prompt,
@@ -2161,62 +2206,18 @@ ANTWORT-FORMAT (NUR dieses JSON, NICHTS anderes):
             "progress": False,
         }
 
-    full_text = run_result.get("text", "")
-
-    try:
-        # Markdown-Block entfernen falls vorhanden
-        if "```json" in full_text:
-            full_text = full_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in full_text:
-            parts = full_text.split("```")
-            if len(parts) >= 3:
-                full_text = parts[1].strip()
-                # Falls der erste Teil nach ``` mit "json" beginnt, entfernen
-                if full_text.startswith("json"):
-                    full_text = full_text[4:].strip()
-
-        if full_text and not full_text.lstrip().startswith("{"):
-            start = full_text.find("{")
-            end = full_text.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                full_text = full_text[start : end + 1]
-
-        result = json.loads(full_text)
-        audit(
-            "vision_check",
-            step=step_num,
-            verdict=result.get("verdict"),
-            page_state=result.get("page_state"),
-            reason=result.get("reason", "")[:150],
-            next_action=result.get("next_action"),
-        )
-        _vision_cache_put(screenshot_hash, action_desc, step_num, result)
-        return result
-
-    except json.JSONDecodeError as e:
-        audit(
-            "error",
-            message=f"Vision JSON Parse Error: {e}",
-            step=step_num,
-            raw_output=full_text[:500],
-        )
-        return {
-            "verdict": "RETRY",
-            "reason": f"JSON Parse Error: {e}",
-            "next_action": "none",
-            "page_state": "unknown",
-            "progress": False,
-        }
-
-    except Exception as e:
-        audit("error", message=f"Vision Exception: {e}", step=step_num)
-        return {
-            "verdict": "RETRY",
-            "reason": str(e),
-            "next_action": "none",
-            "page_state": "unknown",
-            "progress": False,
-        }
+    full_text = str(run_result.get("text", ""))
+    result = parse_vision_response(full_text)
+    audit(
+        "vision_check",
+        step=step_num,
+        verdict=result.get("verdict"),
+        page_state=result.get("page_state"),
+        reason=str(result.get("reason", ""))[:150],
+        next_action=result.get("next_action"),
+    )
+    _vision_cache_put(screenshot_hash, action_desc, step_num, result)
+    return result
 
 
 # ============================================================================
@@ -2366,6 +2367,57 @@ async def dom_verify_change(before_url: str, before_title: str):
         return {"changed": False, "error": str(e)}
 
 
+async def predicate_pre_check(
+    selector: str = "", x: int | None = None, y: int | None = None
+) -> dict[str, object]:
+    if not selector and (x is None or y is None):
+        return {"exists": True, "visible": True, "clickable": True, "occluded": False}
+    normalized_selector = normalize_selector(selector)
+    script = f"""
+    (function() {{
+      const selector = {json.dumps(normalized_selector)};
+      const x = {json.dumps(x)};
+      const y = {json.dumps(y)};
+      const el = selector ? document.querySelector(selector) : document.elementFromPoint(x, y);
+      if (!el) return {{ exists: false, visible: false, clickable: false, occluded: true }};
+      const rect = el.getBoundingClientRect();
+      const cx = x ?? Math.round(rect.left + rect.width / 2);
+      const cy = y ?? Math.round(rect.top + rect.height / 2);
+      const topEl = document.elementFromPoint(cx, cy);
+      const occluded = !!topEl && topEl !== el && !el.contains(topEl);
+      return {{
+        exists: true,
+        visible: el.offsetParent !== null,
+        clickable: typeof el.click === 'function',
+        occluded: occluded,
+      }};
+    }})();
+    """
+    result = await execute_bridge("execute_javascript", {"script": script, **_tab_params()})
+    if isinstance(result, dict) and isinstance(result.get("result"), dict):
+        return result["result"]
+    return {"exists": False, "visible": False, "clickable": False, "occluded": True}
+
+
+async def _dom_text_hash() -> str:
+    script = """
+    (function() {
+      return { text: (document.body && document.body.innerText ? document.body.innerText : '').trim() };
+    })();
+    """
+    result = await execute_bridge("execute_javascript", {"script": script, **_tab_params()})
+    if isinstance(result, dict) and isinstance(result.get("result"), dict):
+        text = str(result["result"].get("text", ""))
+    else:
+        text = ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+async def predicate_post_check(before_hash: str) -> dict[str, object]:
+    new_hash = await _dom_text_hash()
+    return {"changed": bool(new_hash and new_hash != before_hash), "new_hash": new_hash}
+
+
 # ============================================================================
 # KLICK-ESKALATIONSKETTE — 5 Methoden mit Keyboard-Bypass, automatisch eskalierend
 # ============================================================================
@@ -2428,7 +2480,7 @@ async def escalating_click(
     if not selector and description:
         desc_lower = description.lower()
         if "umfrage" in desc_lower or "survey" in desc_lower or "€" in desc_lower:
-            selector = await resolve_survey_selector("div.survey-item", description)
+            selector = await resolve_survey_selector(sitepack_selector("survey_card"), description)
 
     methods = []
     if ref:
@@ -2715,6 +2767,40 @@ async def save_session(label: str):
         audit("session_save", label=label, path=str(session_file))
     except Exception as e:
         audit("error", message=f"Session-Backup fehlgeschlagen: {e}")
+
+
+def _fresh_requested() -> bool:
+    return os.environ.get("HEYPIGGY_FRESH", "").lower() in ("1", "true", "yes")
+
+
+def _load_resume_checkpoint_for_current_run() -> StepContext | None:
+    if _fresh_requested():
+        return None
+    override = os.environ.get("HEYPIGGY_RESUME_CHECKPOINT_PATH", "")
+    if override:
+        return load_checkpoint(Path(override))
+    return load_checkpoint(CHECKPOINT_PATH)
+
+
+async def _get_current_page_url() -> str:
+    try:
+        page_info = await execute_bridge("get_page_info", _tab_params())
+    except Exception:
+        return ""
+    if not isinstance(page_info, dict):
+        return ""
+    return str(page_info.get("url", ""))
+
+
+def _extract_earnings_from_summary(summary_path: Path) -> float:
+    if summary_path.exists():
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            return float(payload.get("earnings", 0.0) or 0.0)
+    return float(os.environ.get("HEYPIGGY_EARNINGS", "0") or 0.0)
 
 
 # ============================================================================
@@ -3109,13 +3195,17 @@ async def _finalize_worker_run(
 
 
 async def main():
-    global CURRENT_RUN_SUMMARY
+    global CURRENT_RUN_SUMMARY, CURRENT_PAGE_FINGERPRINT
     run_summary = RunSummary(run_id=RUN_ID)
     CURRENT_RUN_SUMMARY = run_summary
     gate = None
     recorder = None
     final_exit_reason = "startup"
     final_page_state = "unknown"
+    resume_checkpoint = _load_resume_checkpoint_for_current_run()
+    checkpoint_ctx = resume_checkpoint or StepContext(run_id=RUN_ID, state=AgentState.INIT)
+    if resume_checkpoint is None:
+        save_checkpoint(checkpoint_ctx, CHECKPOINT_PATH)
 
     audit(
         "start",
@@ -3123,6 +3213,12 @@ async def main():
         run_id=RUN_ID,
         artifact_dir=str(ARTIFACT_DIR),
     )
+    if resume_checkpoint is not None:
+        audit(
+            "resume",
+            message=f"RESUMING run {resume_checkpoint.run_id} from state {resume_checkpoint.state} step {resume_checkpoint.step_index}",
+            checkpoint=str(CHECKPOINT_PATH),
+        )
 
     # 1. BRIDGE-VERBINDUNG PRÜFEN
     try:
@@ -3130,6 +3226,7 @@ async def main():
     except Exception as e:
         final_exit_reason = f"bridge_connect_failed: {e}"
         run_summary.bridge_errors += 1
+        checkpoint_ctx = step_context_advance(checkpoint_ctx, CHECKPOINT_PATH, state="FAIL_SAFE")
         await _finalize_worker_run(run_summary, gate, final_exit_reason, final_page_state, recorder)
         audit("stop", reason=f"Bridge-Verbindung fehlgeschlagen: {e}")
         return
@@ -3151,10 +3248,14 @@ async def main():
         if not preflight.get("ok"):
             final_exit_reason = f"preflight_failed: {preflight.get('reason', 'unknown')}"
             run_summary.vision_errors += 1
+            checkpoint_ctx = step_context_advance(
+                checkpoint_ctx, CHECKPOINT_PATH, state="FAIL_SAFE"
+            )
             await _finalize_worker_run(
                 run_summary, gate, final_exit_reason, final_page_state, recorder
             )
             return
+    checkpoint_ctx = step_context_advance(checkpoint_ctx, CHECKPOINT_PATH, state="PREFLIGHT")
 
     # Credentials erst NACH erfolgreichem fail-closed Preflight auslesen.
     # WHY: Die eigentliche Worker-Logik braucht die Werte für inject_credentials(),
@@ -3169,26 +3270,52 @@ async def main():
         buffer_seconds=WORKER_CONFIG.recorder.buffer_seconds,
     )
     await recorder.start()
+    if resume_checkpoint is not None:
+        gate.total_steps = resume_checkpoint.step_index
+        gate.no_progress_count = resume_checkpoint.no_progress_counter
+        gate.last_screenshot_hash = resume_checkpoint.last_page_fingerprint or None
 
     # 4. INITIALE NAVIGATION
-    action_desc = "Navigiere zu HeyPiggy Dashboard"
-    expected = "Dashboard mit verfügbaren Umfragen oder Login-Formular"
+    target_url = (
+        resume_checkpoint.task_url
+        if resume_checkpoint and resume_checkpoint.task_url
+        else sitepack_flow("login")[0]
+    )
+    action_desc = (
+        "Resume aktiven HeyPiggy Run"
+        if resume_checkpoint and resume_checkpoint.task_url
+        else "Navigiere zu HeyPiggy Dashboard"
+    )
+    expected = (
+        "Vorherige Survey oder Dashboard wird geladen"
+        if resume_checkpoint and resume_checkpoint.task_url
+        else "Dashboard mit verfügbaren Umfragen oder Login-Formular"
+    )
 
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     try:
-        audit("navigate", url="https://www.heypiggy.com/login")
+        audit("navigate", url=target_url)
         # KRITISCH: active: True — Tab MUSS im Vordergrund sein!
         # Mit active: False läuft der Tab im Hintergrund → Screenshots zeigen falschen Inhalt
         # → Vision Gate sieht nichts → DOM-Verifikation gibt url="" zurück → Worker hängt
-        tab_res = await execute_bridge(
-            "tabs_create", {"url": "https://www.heypiggy.com/login", "active": True}
-        )
+        tab_res = await execute_bridge("tabs_create", {"url": target_url, "active": True})
         if isinstance(tab_res, dict) and "tabId" in tab_res:
             CURRENT_TAB_ID = tab_res["tabId"]
             CURRENT_WINDOW_ID = tab_res.get("windowId", CURRENT_WINDOW_ID)
             audit(
                 "success",
                 message=f"Worker-Tab erstellt und gebunden: tabId={CURRENT_TAB_ID}, windowId={CURRENT_WINDOW_ID}",
+            )
+            checkpoint_ctx = step_context_advance(
+                checkpoint_ctx,
+                CHECKPOINT_PATH,
+                state="EXECUTE_TASK_LOOP"
+                if resume_checkpoint and resume_checkpoint.task_url
+                else "NAVIGATE_LOGIN",
+                step_index=gate.total_steps,
+                task_url=target_url,
+                no_progress_counter=gate.no_progress_count,
+                last_page_fingerprint=gate.last_screenshot_hash or "",
             )
         else:
             final_exit_reason = "tabs_create_missing_tab_id"
@@ -3200,6 +3327,15 @@ async def main():
                 reason=f"tabs_create hat keine tabId zurückgegeben: {tab_res}. "
                 "Kein Fallback auf aktiven Tab erlaubt.",
             )
+            checkpoint_ctx = step_context_advance(
+                checkpoint_ctx,
+                CHECKPOINT_PATH,
+                state="FAIL_SAFE",
+                step_index=gate.total_steps,
+                task_url=target_url,
+                no_progress_counter=gate.no_progress_count,
+                last_page_fingerprint=gate.last_screenshot_hash or "",
+            )
             await _finalize_worker_run(
                 run_summary, gate, final_exit_reason, final_page_state, recorder
             )
@@ -3208,6 +3344,15 @@ async def main():
         final_exit_reason = f"initial_navigation_failed: {e}"
         run_summary.bridge_errors += 1
         audit("stop", reason=f"Initiale Navigation fehlgeschlagen: {e}")
+        checkpoint_ctx = step_context_advance(
+            checkpoint_ctx,
+            CHECKPOINT_PATH,
+            state="FAIL_SAFE",
+            step_index=gate.total_steps,
+            task_url=target_url,
+            no_progress_counter=gate.no_progress_count,
+            last_page_fingerprint=gate.last_screenshot_hash or "",
+        )
         await _finalize_worker_run(run_summary, gate, final_exit_reason, final_page_state, recorder)
         return
 
@@ -3216,6 +3361,15 @@ async def main():
         final_exit_reason = "missing_current_tab_id_after_init"
         run_summary.bridge_errors += 1
         audit("stop", reason="CURRENT_TAB_ID ist nach Init immer noch None — Abbruch")
+        checkpoint_ctx = step_context_advance(
+            checkpoint_ctx,
+            CHECKPOINT_PATH,
+            state="FAIL_SAFE",
+            step_index=gate.total_steps,
+            task_url=target_url,
+            no_progress_counter=gate.no_progress_count,
+            last_page_fingerprint=gate.last_screenshot_hash or "",
+        )
         await _finalize_worker_run(run_summary, gate, final_exit_reason, final_page_state, recorder)
         return
 
@@ -3238,6 +3392,7 @@ async def main():
 
         # ---- SCREENSHOT ----
         img_path, img_hash = await take_screenshot(current_step, label=action_desc[:20])
+        CURRENT_PAGE_FINGERPRINT = img_hash or CURRENT_PAGE_FINGERPRINT
         if not img_path:
             gate.record_step("RETRY", "", "unknown")
             run_summary.record_step(
@@ -3335,6 +3490,15 @@ async def main():
             run_summary.vision_errors += 1
             audit("stop", reason=reason, page_state=page_state)
             await save_session("stop_state")
+            checkpoint_ctx = step_context_advance(
+                checkpoint_ctx,
+                CHECKPOINT_PATH,
+                state="FAIL_SAFE",
+                step_index=gate.total_steps,
+                task_url=before_url or checkpoint_ctx.task_url,
+                no_progress_counter=gate.no_progress_count,
+                last_page_fingerprint=img_hash or checkpoint_ctx.last_page_fingerprint,
+            )
             break
 
         # ---- RETRY ----
@@ -3396,6 +3560,7 @@ async def main():
 
         # URL und Title VOR der Aktion für DOM-Verifikation sammeln
         before_url, before_title = "", ""
+        before_dom_hash = ""
         try:
             pi_params = _tab_params()
             pi = await execute_bridge("get_page_info", pi_params)
@@ -3404,6 +3569,52 @@ async def main():
                 before_title = pi.get("title", "")
         except Exception:
             pass
+        try:
+            before_dom_hash = await _dom_text_hash()
+        except Exception:
+            before_dom_hash = ""
+        if before_dom_hash:
+            CURRENT_PAGE_FINGERPRINT = before_dom_hash
+        checkpoint_ctx = step_context_advance(
+            checkpoint_ctx,
+            CHECKPOINT_PATH,
+            state="EXECUTE_TASK_LOOP",
+            step_index=current_step,
+            task_url=before_url or target_url,
+            no_progress_counter=gate.no_progress_count,
+            last_page_fingerprint=img_hash or "",
+        )
+        selector_for_predicate = ""
+        x_for_predicate = None
+        y_for_predicate = None
+        if isinstance(next_params, dict):
+            selector_for_predicate = str(next_params.get("selector", ""))
+            raw_x = next_params.get("x")
+            raw_y = next_params.get("y")
+            x_for_predicate = raw_x if isinstance(raw_x, int) else None
+            y_for_predicate = raw_y if isinstance(raw_y, int) else None
+        if next_action in CLICK_ACTIONS or next_action == "type_text":
+            pre_check = await predicate_pre_check(
+                selector=selector_for_predicate,
+                x=x_for_predicate,
+                y=y_for_predicate,
+            )
+            if (
+                not pre_check.get("exists")
+                or not pre_check.get("visible")
+                or pre_check.get("occluded")
+            ):
+                audit(
+                    "predicate_pre_check",
+                    step=current_step,
+                    selector=selector_for_predicate,
+                    x=x_for_predicate,
+                    y=y_for_predicate,
+                    result=pre_check,
+                )
+                gate.record_step("RETRY", img_hash or "", final_page_state)
+                await human_delay(2.0, 4.0)
+                continue
 
         try:
             # Scroll-Aktionen
@@ -3437,6 +3648,11 @@ async def main():
                 params = {**next_params, **_tab_params()}
                 await execute_bridge(next_action, params)
 
+        except BridgeUnavailableError as e:
+            final_exit_reason = "bridge_unreachable_during_loop"
+            run_summary.bridge_errors += 1
+            audit("error", message=f"Bridge unreachable during action {next_action}: {e}")
+            break
         except Exception as e:
             audit(
                 "error",
@@ -3462,8 +3678,9 @@ async def main():
                 )
 
         await asyncio.sleep(get_fail_learning_dom_wait_seconds())
+        post_check = await predicate_post_check(before_dom_hash)
         dom_check = await dom_verify_change(before_url, before_title)
-        if dom_check.get("changed"):
+        if post_check.get("changed") or dom_check.get("changed"):
             # DOM hat sich verändert → echter Fortschritt → no_progress_count zurücksetzen
             gate.mark_dom_progress()
             audit(
@@ -3471,6 +3688,12 @@ async def main():
                 message="DOM-Verifikation: Seite hat sich nach Aktion erfolgreich verändert!",
             )
         else:
+            audit(
+                "no_progress",
+                step=current_step,
+                selector=selector_for_predicate,
+                dom_hash=before_dom_hash,
+            )
             audit(
                 "warning",
                 message="DOM-Verifikation: Keine Veränderung nach Aktion erkannt (Vision wird gleich prüfen).",
@@ -3489,18 +3712,64 @@ async def main():
     summary_path, fail_report_path, final_exit_reason = await _finalize_worker_run(
         run_summary, gate, final_exit_reason, final_page_state, recorder
     )
+    archived_dir = None
+    earnings = _extract_earnings_from_summary(summary_path)
+    if final_exit_reason in {"vision_done", "loop_finished"}:
+        checkpoint_ctx = step_context_advance(
+            checkpoint_ctx,
+            CHECKPOINT_PATH,
+            state=AgentState.COMPLETE,
+            step_index=gate.total_steps,
+            task_url=checkpoint_ctx.task_url,
+            no_progress_counter=gate.no_progress_count,
+            last_page_fingerprint=checkpoint_ctx.last_page_fingerprint,
+        )
+        clear_checkpoint(CHECKPOINT_PATH)
+        archived_dir = archive_run_bundle(ARTIFACT_DIR, RUN_ID, base_dir=ARTIFACT_BASE_DIR)
+        summary_path = archived_dir / "run_summary.json"
+        if fail_report_path is not None:
+            fail_report_path = archived_dir / "fail_replay" / fail_report_path.name
+    else:
+        checkpoint_ctx = step_context_advance(
+            checkpoint_ctx,
+            CHECKPOINT_PATH,
+            state=AgentState.EXECUTE_TASK_LOOP,
+            reason="preserve-before-terminal-handler",
+            step_index=gate.total_steps,
+            task_url=checkpoint_ctx.task_url,
+            no_progress_counter=gate.no_progress_count,
+            last_page_fingerprint=checkpoint_ctx.last_page_fingerprint,
+        )
+        if final_exit_reason == "limit_reached:max_retries":
+            escalate(
+                checkpoint_ctx,
+                CHECKPOINT_PATH,
+                ARTIFACT_DIR,
+                final_exit_reason,
+            )
+        else:
+            fail_safe(checkpoint_ctx, CHECKPOINT_PATH, final_exit_reason)
     run_summary.print_summary()
+    final_artifact_dir = archived_dir or ARTIFACT_DIR
+    recent_archives = list_recent_archives(ARTIFACT_BASE_DIR, limit=5)
 
     print(f"\n{'=' * 60}")
     print(f"🏁 LAUF BEENDET — Zusammenfassung:")
     print(f"   Schritte: {gate.total_steps}/{MAX_STEPS}")
     print(f"   Erfolgreich: {gate.successful_actions}")
     print(f"   Screenshots: {len(list(SCREENSHOT_DIR.glob('*.png')))}")
-    print(f"   Artefakte: {ARTIFACT_DIR}")
+    print(f"   Artefakte: {final_artifact_dir}")
     print(f"   Audit-Log: {AUDIT_LOG_PATH}")
     print(f"   Structured Summary: {summary_path}")
     if fail_report_path is not None:
         print(f"   Fail Replay Report: {fail_report_path}")
+    if archived_dir is not None:
+        print(f"   \033[92mEarnings: ${earnings:.2f}\033[0m")
+        print("   Letzte 5 abgeschlossenen Runs:")
+        for archived_run in recent_archives:
+            print(
+                f"     - {archived_run.run_id} | ${archived_run.earnings:.2f} | {archived_run.duration_seconds:.1f}s"
+            )
     print(f"{'=' * 60}\n")
 
 
