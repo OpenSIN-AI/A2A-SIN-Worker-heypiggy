@@ -525,6 +525,16 @@ class HeyPiggyActionLoopDetectorTests(unittest.TestCase):
         self.assertFalse(gate.record_action("h1", "click_element", params))
         self.assertFalse(gate.record_action("h1", "click_element", params))
 
+    def test_action_history_resets_on_page_state_change(self):
+        gate = worker.VisionGateController()
+        params = {"selector": "#btn"}
+        gate.record_action("h1", "click_element", params)
+        gate.record_action("h1", "click_element", params)
+
+        gate.record_step("PROCEED", "hash1", page_state="dashboard")
+
+        self.assertFalse(gate.record_action("h1", "click_element", params))
+
 
 class HeyPiggyProfileAutofillTests(unittest.TestCase):
     def test_email_placeholder_still_works(self):
@@ -721,6 +731,78 @@ class HeyPiggyFailLearningMemoryTests(unittest.TestCase):
             delay_min, delay_max = worker.get_fail_learning_delay_bounds(5.0, 10.0)
 
         self.assertEqual((delay_min, delay_max), (5.0, 10.0))
+
+    def test_get_fail_learning_dom_wait_seconds_expands_after_timing_failures(self):
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"timing_issue": 2}},
+        ):
+            self.assertEqual(worker.get_fail_learning_dom_wait_seconds(1.0), 2.0)
+
+    def test_apply_fail_learning_to_decision_prefers_click_ref_after_selector_issues(
+        self,
+    ):
+        gate = worker.VisionGateController()
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_element",
+            "next_params": {"selector": ".submit", "ref": "@e9"},
+            "reason": "button sichtbar",
+            "progress": True,
+        }
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"selector_issue": 1}},
+        ):
+            adapted = worker.apply_fail_learning_to_decision(decision, gate, "hash1")
+
+        self.assertEqual(adapted["next_action"], "click_ref")
+        self.assertEqual(adapted["next_params"], {"ref": "@e9"})
+
+    def test_apply_fail_learning_to_decision_prefers_ghost_click_for_id_selector(self):
+        gate = worker.VisionGateController()
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_element",
+            "next_params": {"selector": "#submit-button"},
+            "reason": "id button sichtbar",
+            "progress": True,
+        }
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"selector_issue": 1}},
+        ):
+            adapted = worker.apply_fail_learning_to_decision(decision, gate, "hash1")
+
+        self.assertEqual(adapted["next_action"], "ghost_click")
+        self.assertEqual(adapted["next_params"], {"selector": "#submit-button"})
+
+    def test_apply_fail_learning_to_decision_blocks_known_loop_pattern(self):
+        gate = worker.VisionGateController()
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_element",
+            "next_params": {"selector": "#btn"},
+            "reason": "weiter klicken",
+            "progress": True,
+        }
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"loop_detected": 1}},
+        ):
+            worker.apply_fail_learning_to_decision(decision, gate, "hash-loop")
+            worker.apply_fail_learning_to_decision(decision, gate, "hash-loop")
+            adapted = worker.apply_fail_learning_to_decision(
+                decision, gate, "hash-loop"
+            )
+
+        self.assertEqual(adapted["verdict"], "RETRY")
+        self.assertEqual(adapted["next_action"], "none")
+        self.assertEqual(adapted["next_params"], {})
 
 
 class HeyPiggyFinalizeWorkerRunTests(unittest.IsolatedAsyncioTestCase):

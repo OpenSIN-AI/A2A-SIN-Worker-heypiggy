@@ -349,6 +349,81 @@ def get_fail_learning_delay_bounds(
     return min_sec, max_sec
 
 
+def get_fail_learning_dom_wait_seconds(default_seconds: float = 1.0) -> float:
+    memory = load_fail_learning()
+    issue_counts = memory.get("issue_counts", {})
+    if isinstance(issue_counts, dict) and int(issue_counts.get("timing_issue", 0)) > 0:
+        return default_seconds + 1.0
+    return default_seconds
+
+
+def apply_fail_learning_to_decision(
+    decision: dict[str, object],
+    gate,
+    screenshot_hash: str,
+) -> dict[str, object]:
+    next_action = str(decision.get("next_action", "none"))
+    raw_params = decision.get("next_params", {})
+    next_params = raw_params if isinstance(raw_params, dict) else {}
+
+    memory = load_fail_learning()
+    issue_counts = memory.get("issue_counts", {})
+    selector_issues = 0
+    loop_issues = 0
+    if isinstance(issue_counts, dict):
+        selector_issues = int(issue_counts.get("selector_issue", 0))
+        loop_issues = int(issue_counts.get("loop_detected", 0))
+
+    adapted = dict(decision)
+    adapted["next_params"] = dict(next_params)
+
+    if loop_issues > 0 and gate.record_action(
+        screenshot_hash, next_action, next_params
+    ):
+        adapted["verdict"] = "RETRY"
+        adapted["next_action"] = "none"
+        adapted["next_params"] = {}
+        adapted["reason"] = (
+            f"Fail-learning loop guard blockiert wiederholte Aktion: {next_action}"
+        )
+        adapted["progress"] = False
+        audit("warning", message="Fail-learning loop guard aktiv", action=next_action)
+        return adapted
+
+    if selector_issues <= 0 or next_action != "click_element":
+        return adapted
+
+    selector = str(next_params.get("selector", ""))
+    ref = str(next_params.get("ref", ""))
+    description = str(next_params.get("description", ""))
+
+    if ref:
+        adapted["next_action"] = "click_ref"
+        adapted["next_params"] = {"ref": ref}
+        adapted["reason"] = (
+            f"{adapted.get('reason', '')} | Fail-learning bevorzugt click_ref nach Selector-Fails"
+        ).strip(" |")
+        return adapted
+
+    if selector.startswith("#"):
+        adapted["next_action"] = "ghost_click"
+        adapted["next_params"] = {"selector": selector}
+        adapted["reason"] = (
+            f"{adapted.get('reason', '')} | Fail-learning bevorzugt ghost_click für stabile ID-Targets"
+        ).strip(" |")
+        return adapted
+
+    if description:
+        adapted["next_action"] = "vision_click"
+        adapted["next_params"] = {"description": description}
+        adapted["reason"] = (
+            f"{adapted.get('reason', '')} | Fail-learning weicht auf vision_click aus"
+        ).strip(" |")
+        return adapted
+
+    return adapted
+
+
 # ============================================================================
 # EXAKTE TAB-BINDUNG — GLOBAL STATE (PRIORITY -7.85)
 # ============================================================================
@@ -2516,6 +2591,7 @@ class VisionGateController:
         if page_state:
             if page_state != self.last_page_state:
                 self.failed_selectors.clear()
+                self.clear_action_history()
                 audit("state_change", old=self.last_page_state, new=page_state)
             self.last_page_state = page_state
 
@@ -2978,6 +3054,13 @@ async def main():
         next_params = decision.get("next_params", {})
         progress = decision.get("progress", False)
 
+        decision = apply_fail_learning_to_decision(decision, gate, img_hash or "")
+        verdict = decision.get("verdict", verdict)
+        next_action = decision.get("next_action", next_action)
+        next_params = decision.get("next_params", next_params)
+        progress = decision.get("progress", progress)
+        reason = decision.get("reason", reason)
+
         # Schritt aufzeichnen
         gate.record_step(str(verdict), img_hash or "", final_page_state)
         if recorder is not None:
@@ -3187,7 +3270,7 @@ async def main():
                     answer=answer_desc[:80],
                 )
 
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(get_fail_learning_dom_wait_seconds())
         dom_check = await dom_verify_change(before_url, before_title)
         if dom_check.get("changed"):
             # DOM hat sich verändert → echter Fortschritt → no_progress_count zurücksetzen
