@@ -500,6 +500,75 @@ class HeyPiggyVisionCacheTests(unittest.TestCase):
         worker._vision_cache_put("hash123", "click weiter", 1, {"verdict": "PROCEED"})
         self.assertIsNone(worker._vision_cache_get("hash123", "click andere", 2))
 
+    def test_cache_bypasses_fragile_click_after_selector_fail_learning(self):
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_element",
+            "next_params": {"selector": ".fragile-button"},
+        }
+        worker._VISION_CACHE[("hash123", "desc")] = dict(decision)
+
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"selector_issue": 1}},
+        ):
+            cached = worker._vision_cache_get("hash123", "desc", 2)
+
+        self.assertIsNone(cached)
+
+    def test_cache_keeps_stable_id_click_when_selector_fail_learning_exists(self):
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_element",
+            "next_params": {"selector": "#stable-button"},
+        }
+        worker._VISION_CACHE[("hash123", "desc")] = dict(decision)
+
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"selector_issue": 1}},
+        ):
+            cached = worker._vision_cache_get("hash123", "desc", 2)
+
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached["next_params"], {"selector": "#stable-button"})
+
+    def test_cache_does_not_store_fragile_click_when_selector_fail_learning_exists(
+        self,
+    ):
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_element",
+            "next_params": {"selector": ".fragile-button"},
+        }
+
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"selector_issue": 1}},
+        ):
+            worker._vision_cache_put("hash123", "desc", 1, decision)
+
+        self.assertEqual(worker._VISION_CACHE, {})
+
+    def test_cache_does_not_store_click_actions_when_loop_learning_exists(self):
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_ref",
+            "next_params": {"ref": "@e9"},
+        }
+
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={"recent_failures": [], "issue_counts": {"loop_detected": 1}},
+        ):
+            worker._vision_cache_put("hash123", "desc", 1, decision)
+
+        self.assertEqual(worker._VISION_CACHE, {})
+
 
 class HeyPiggyActionLoopDetectorTests(unittest.TestCase):
     def test_loop_detected_after_three_identical_actions(self):

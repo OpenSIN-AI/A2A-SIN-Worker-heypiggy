@@ -357,6 +357,51 @@ def get_fail_learning_dom_wait_seconds(default_seconds: float = 1.0) -> float:
     return default_seconds
 
 
+def _get_fail_issue_counts() -> dict[str, int]:
+    memory = load_fail_learning()
+    issue_counts = memory.get("issue_counts", {})
+    if not isinstance(issue_counts, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, value in issue_counts.items():
+        try:
+            out[str(key)] = int(value)
+        except Exception:
+            continue
+    return out
+
+
+def _is_fragile_cached_click(decision: dict[str, object]) -> bool:
+    next_action = str(decision.get("next_action", "none"))
+    if next_action != "click_element":
+        return False
+    raw_params = decision.get("next_params", {})
+    if not isinstance(raw_params, dict):
+        return False
+    selector = str(raw_params.get("selector", ""))
+    return bool(selector) and not selector.startswith("#")
+
+
+def _should_bypass_cached_decision(decision: dict[str, object]) -> bool:
+    issue_counts = _get_fail_issue_counts()
+    if issue_counts.get("selector_issue", 0) > 0 and _is_fragile_cached_click(decision):
+        return True
+    if (
+        issue_counts.get("loop_detected", 0) > 0
+        and str(decision.get("next_action", "none")) in CLICK_ACTIONS
+    ):
+        return True
+    return False
+
+
+def _should_store_cached_decision(decision: dict[str, object]) -> bool:
+    if decision.get("verdict") != "PROCEED":
+        return False
+    if _should_bypass_cached_decision(decision):
+        return False
+    return True
+
+
 def apply_fail_learning_to_decision(
     decision: dict[str, object],
     gate,
@@ -1738,6 +1783,9 @@ def _vision_cache_get(
     cached = _VISION_CACHE.get(cache_key)
     if not cached:
         return None
+    if _should_bypass_cached_decision(cached):
+        audit("vision_cache_bypass", step=step_num, hash=screenshot_hash[:8])
+        return None
     audit("vision_cache_hit", step=step_num, hash=screenshot_hash[:8])
     return dict(cached)
 
@@ -1747,7 +1795,7 @@ def _vision_cache_put(
 ) -> None:
     if not screenshot_hash:
         return
-    if decision.get("verdict") != "PROCEED":
+    if not _should_store_cached_decision(decision):
         return
     cache_key = (screenshot_hash, action_desc.strip().lower())
     _VISION_CACHE[cache_key] = dict(decision)
