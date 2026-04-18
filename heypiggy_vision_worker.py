@@ -74,6 +74,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # ============================================================================
+# FAIL-REPLAY VIDEO RECORDER — Ring-Buffer + NVIDIA Multi-Frame Analyse
+# WHY: Bei Worker-Fails haben wir nur einzelne Screenshots. Der Ring-Buffer
+#      hält die letzten 120s als Frame-Sequenz. Bei Fail: 12 Keyframes an
+#      NVIDIA Llama-90B für automatische Root-Cause-Analyse senden.
+# CONSEQUENCES: Kein Fail bleibt ohne Erklärung. Zero Overhead im Happy-Path.
+# ============================================================================
+from fail_recorder import ScreenRingRecorder, save_keyframes_to_disk
+from nvidia_video_analyzer import analyze_fail_multiframe
+from fail_report import (
+    generate_fail_report_markdown,
+    save_fail_report_to_disk,
+    post_github_issue_comment,
+)
+
+# ============================================================================
 # USER PROFIL — Jeremy Schulze
 # WHY: Der Worker muss Profil-Fragen (Region, Wohnort, Geschlecht, Name etc.)
 #      korrekt mit den echten Daten des Users beantworten.
@@ -82,6 +97,7 @@ from pathlib import Path
 # CONSEQUENCES: Ohne Profil würde Gemini zufällig antworten → falsche Daten,
 #               Umfragen brechen ab, Account könnte gesperrt werden.
 # ============================================================================
+
 
 def _resolve_profile_path() -> Path:
     """
@@ -565,7 +581,9 @@ async def _nvidia_nim_chat(
 
     # Bild laden + ggf. komprimieren
     try:
-        img_bytes = _downscale_png_if_needed(screenshot_path, NVIDIA_NIM_MAX_IMAGE_BYTES)
+        img_bytes = _downscale_png_if_needed(
+            screenshot_path, NVIDIA_NIM_MAX_IMAGE_BYTES
+        )
     except Exception as e:
         return {
             "ok": False,
@@ -700,9 +718,7 @@ async def _nvidia_nim_chat(
         content = choices[0].get("message", {}).get("content", "")
         if isinstance(content, list):
             # Manche NIM-Modelle streamen content als Liste von {type,text}
-            content = "".join(
-                c.get("text", "") for c in content if isinstance(c, dict)
-            )
+            content = "".join(c.get("text", "") for c in content if isinstance(c, dict))
         return {
             "ok": True,
             "auth_failure": False,
@@ -1756,7 +1772,16 @@ async def dom_prescan():
             def _a11y_priority(line: str) -> int:
                 low = line.lower()
                 if "button" in low and any(
-                    w in low for w in ("weiter", "nächste", "naechste", "continue", "next", "submit", "absenden")
+                    w in low
+                    for w in (
+                        "weiter",
+                        "nächste",
+                        "naechste",
+                        "continue",
+                        "next",
+                        "submit",
+                        "absenden",
+                    )
                 ):
                     return 100
                 if "[radio" in low or "[checkbox" in low:
@@ -2462,7 +2487,11 @@ async def escalating_click(
                 else:
                     await asyncio.sleep(0.8)
                     if await _verify_click_effect(before_url, before_title):
-                        audit("success", method="click_ref", message="Klick bestätigt via DOM")
+                        audit(
+                            "success",
+                            method="click_ref",
+                            message="Klick bestätigt via DOM",
+                        )
                         return True
                 continue
 
@@ -2473,7 +2502,11 @@ async def escalating_click(
                 else:
                     await asyncio.sleep(0.8)
                     if await _verify_click_effect(before_url, before_title):
-                        audit("success", method="click_element", message="Klick bestätigt via DOM")
+                        audit(
+                            "success",
+                            method="click_element",
+                            message="Klick bestätigt via DOM",
+                        )
                         return True
                 continue
 
@@ -2514,7 +2547,11 @@ async def escalating_click(
                 else:
                     await asyncio.sleep(0.8)
                     if await _verify_click_effect(before_url, before_title):
-                        audit("success", method="ghost_click", message="Klick bestätigt via DOM")
+                        audit(
+                            "success",
+                            method="ghost_click",
+                            message="Klick bestätigt via DOM",
+                        )
                         return True
                 continue
 
@@ -2541,12 +2578,20 @@ async def escalating_click(
                 await keyboard_action(["Enter"], selector=sel)
                 await asyncio.sleep(0.8)
                 if await _verify_click_effect(before_url, before_title):
-                    audit("success", method="keyboard_enter", message="Enter bestätigt via DOM")
+                    audit(
+                        "success",
+                        method="keyboard_enter",
+                        message="Enter bestätigt via DOM",
+                    )
                     return True
                 await keyboard_action(["Space"], selector=sel)
                 await asyncio.sleep(0.8)
                 if await _verify_click_effect(before_url, before_title):
-                    audit("success", method="keyboard_space", message="Space bestätigt via DOM")
+                    audit(
+                        "success",
+                        method="keyboard_space",
+                        message="Space bestätigt via DOM",
+                    )
                     return True
                 continue
 
@@ -2557,7 +2602,11 @@ async def escalating_click(
                 else:
                     await asyncio.sleep(0.8)
                     if await _verify_click_effect(before_url, before_title):
-                        audit("success", method="vision_click", message="Klick bestätigt via DOM")
+                        audit(
+                            "success",
+                            method="vision_click",
+                            message="Klick bestätigt via DOM",
+                        )
                         return True
                 continue
 
@@ -2589,7 +2638,11 @@ async def escalating_click(
                 else:
                     await asyncio.sleep(0.8)
                     if await _verify_click_effect(before_url, before_title):
-                        audit("success", method="coord_click", message="Coord-Klick bestätigt via DOM")
+                        audit(
+                            "success",
+                            method="coord_click",
+                            message="Coord-Klick bestätigt via DOM",
+                        )
                         return True
                 continue
 
@@ -2692,7 +2745,9 @@ class VisionGateController:
 
     def fingerprint(self, img_hash: str, action: str, params: dict) -> str:
         """Erzeugt einen Fingerprint für Action-Loop-Detection."""
-        sel = params.get("selector") or params.get("ref") or params.get("description", "")
+        sel = (
+            params.get("selector") or params.get("ref") or params.get("description", "")
+        )
         return f"{img_hash or '?'}::{action}::{str(sel)[:60]}"
 
     def record_action(self, img_hash: str, action: str, params: dict) -> bool:
@@ -2818,8 +2873,14 @@ class VisionGateController:
 #      Profil echte Daten haben.
 _PROFILE_FIELD_PATTERNS = [
     # (regex, [profile_keys in priority order])
-    (r"(first[-_ ]?name|vorname|given[-_ ]?name|firstname|fname)", ["first_name", "name"]),
-    (r"(last[-_ ]?name|nachname|surname|family[-_ ]?name|lastname|lname)", ["last_name"]),
+    (
+        r"(first[-_ ]?name|vorname|given[-_ ]?name|firstname|fname)",
+        ["first_name", "name"],
+    ),
+    (
+        r"(last[-_ ]?name|nachname|surname|family[-_ ]?name|lastname|lname)",
+        ["last_name"],
+    ),
     (r"(full[-_ ]?name|^name$|displayname|your[-_ ]?name)", ["name", "first_name"]),
     (r"(city|stadt|ort|town)", ["city"]),
     (r"(region|bundesland|state|province)", ["region"]),
@@ -2914,7 +2975,10 @@ def inject_credentials(params: dict, email: str, pwd: str) -> dict:
     profile_val = _resolve_profile_value(field_hint)
     if profile_val and (not text or text_upper in ("AUTO", "PROFILE", "<AUTO>")):
         params["text"] = profile_val
-        audit("action", message=f"Profile autofill: hint='{field_hint[:40]}' → profile value injected")
+        audit(
+            "action",
+            message=f"Profile autofill: hint='{field_hint[:40]}' → profile value injected",
+        )
 
     return params
 
@@ -2990,11 +3054,20 @@ async def main():
         artifact_dir=str(ARTIFACT_DIR),
     )
 
+    # 0. FAIL-REPLAY RECORDER INITIALISIEREN
+    # WHY: Muss VOR der Bridge-Verbindung starten damit auch Bridge-Timeouts
+    #      im Ring-Buffer landen und bei Fail analysiert werden können.
+    # CONSEQUENCES: 1fps, 120s Buffer, ~6MB RAM. Zero Impact im Happy-Path.
+    fail_recorder = ScreenRingRecorder(fps=1.0, buffer_seconds=120.0)
+    await fail_recorder.start()
+    audit("recorder", message="Fail-Replay Ring-Buffer Recorder gestartet (1fps, 120s)")
+
     # 1. BRIDGE-VERBINDUNG PRÜFEN
     try:
         await wait_for_extension(timeout=600)
     except Exception as e:
         audit("stop", reason=f"Bridge-Verbindung fehlgeschlagen: {e}")
+        await fail_recorder.stop()
         return
 
     # 2. PRE-FLIGHT — Pflicht-Env + Vision-Auth müssen VOR Browser-Mutation healthy sein
@@ -3087,7 +3160,9 @@ async def main():
         try:
             pi_result = await pageinfo_task
             pre_url = pi_result.get("url", "") if isinstance(pi_result, dict) else ""
-            pre_title = pi_result.get("title", "") if isinstance(pi_result, dict) else ""
+            pre_title = (
+                pi_result.get("title", "") if isinstance(pi_result, dict) else ""
+            )
         except Exception:
             pre_url, pre_title = "", ""
         if not img_path:
@@ -3101,7 +3176,7 @@ async def main():
         # STRATEGIE: Standard 1.0-2.5s; bei aufeinanderfolgenden RETRYs steigt der
         # Delay exponentiell (Backoff) um echte Rate-Limits zu entspannen.
         if gate.consecutive_retries >= 2:
-            backoff = min(2.0 ** gate.consecutive_retries, 20.0)
+            backoff = min(2.0**gate.consecutive_retries, 20.0)
             await human_delay(backoff, backoff + 2.0)
         else:
             await human_delay(1.0, 2.5)
@@ -3124,6 +3199,16 @@ async def main():
 
         # Schritt aufzeichnen
         gate.record_step(verdict, img_hash, page_state)
+
+        # FAIL-REPLAY: Letzten Frame im Ring-Buffer mit Step-Kontext annotieren
+        # WHY: Ohne Annotation weiß NVIDIA bei Fail-Analyse nicht welcher Frame
+        #      welchem Worker-Schritt entspricht — die Zeitreihe wäre kontextlos.
+        # CONSEQUENCES: Jeder Frame bekommt step_label + verdict + page_state.
+        fail_recorder.annotate_last_frame(
+            step_label=f"step_{gate.total_steps}_{next_action}",
+            verdict=verdict,
+            page_state=page_state,
+        )
 
         print(f"\n{'=' * 60}")
         print(
@@ -3175,11 +3260,22 @@ async def main():
                 message="SURVEY ABSCHLUSS-GARANTIE: survey_active aber Vision will stoppen → Ignoriert! Suche Weiter-Button im DOM.",
             )
             forced_click = False
-            for hint in ("Nächste", "Weiter", "Continue", "Next", "Submit", "Fertig", "Absenden"):
+            for hint in (
+                "Nächste",
+                "Weiter",
+                "Continue",
+                "Next",
+                "Submit",
+                "Fertig",
+                "Absenden",
+            ):
                 try:
                     res = await click_visible_button_with_text(hint)
                     if isinstance(res, dict) and res.get("result", {}).get("clicked"):
-                        audit("success", message=f"Weiter-Button via DOM-Fallback geklickt: '{hint}'")
+                        audit(
+                            "success",
+                            message=f"Weiter-Button via DOM-Fallback geklickt: '{hint}'",
+                        )
                         forced_click = True
                         break
                 except Exception:
@@ -3248,6 +3344,9 @@ async def main():
             await save_session(f"survey_done_{gate.total_steps}")
             # no_progress_count zurücksetzen — Abschluss ist echter Fortschritt
             gate.mark_dom_progress()
+            # FAIL-REPLAY: Buffer leeren — erfolgreiche Survey braucht keinen Replay
+            # WHY: Speicher freigeben, alter Kontext ist irrelevant für nächste Survey.
+            fail_recorder.clear()
             await human_delay(2.0, 4.0)
             continue
 
@@ -3263,7 +3362,9 @@ async def main():
             audit(
                 "state_change",
                 message=f"ACTION-LOOP erkannt (3x identische Aktion): erzwinge Scroll+Unstick",
-                loop_fingerprint=gate.fingerprint(img_hash, next_action, next_params)[:80],
+                loop_fingerprint=gate.fingerprint(img_hash, next_action, next_params)[
+                    :80
+                ],
             )
             try:
                 # Alternierend nach oben/unten scrollen damit wir Elemente außerhalb
@@ -3376,6 +3477,9 @@ async def main():
     # ABSCHLUSS — Zusammenfassung und Proof-Collection
     # ============================================================================
 
+    # Recorder stoppen (Frames bleiben im Buffer für finale Analyse)
+    await fail_recorder.stop()
+
     # Final Session sichern
     await save_session("final")
 
@@ -3396,6 +3500,102 @@ async def main():
     summary_path = ARTIFACT_DIR / "run_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
 
+    # ============================================================================
+    # FAIL-REPLAY VIDEO ANALYSE — Automatische Root-Cause-Analyse bei Versagen
+    # WHY: Wenn der Worker NICHT mit survey_done endet, war es ein Fail.
+    #      Ring-Buffer Keyframes an NVIDIA Llama-90B senden für automatische
+    #      Ursachen-Erkennung. Report als GitHub Issue Comment + lokale Kopie.
+    # CONSEQUENCES: Jeder Fail wird automatisch analysiert und dokumentiert.
+    #      Im Happy-Path (survey_done) wird dieser Block komplett übersprungen.
+    # ============================================================================
+    run_was_fail = gate.last_page_state not in ("survey_done", "completed")
+    if run_was_fail and fail_recorder.frame_count > 0:
+        audit(
+            "recorder",
+            message=f"FAIL erkannt — starte NVIDIA Video-Analyse mit {fail_recorder.frame_count} Frames",
+        )
+        try:
+            keyframes = fail_recorder.get_keyframes(n=12)
+            keyframe_bytes = [f.png_bytes for f in keyframes]
+            step_annotations = [
+                f"{f.step_label} | {f.vision_verdict} | {f.page_state}"
+                for f in keyframes
+            ]
+
+            fail_context = (
+                f"Worker beendet nach {gate.total_steps} Schritten. "
+                f"Letzter State: {gate.last_page_state}. "
+                f"Retries: {gate.consecutive_retries}. "
+                f"No-Progress: {gate.no_progress_count}. "
+                f"Failed Selectors: {', '.join(list(gate.failed_selectors)[:5])}"
+            )
+
+            nvidia_key = os.environ.get("NVIDIA_API_KEY", "")
+            analysis = await analyze_fail_multiframe(
+                keyframe_bytes=keyframe_bytes,
+                fail_context=fail_context,
+                nvidia_api_key=nvidia_key,
+                step_annotations=step_annotations,
+            )
+
+            audit(
+                "recorder",
+                message=f"NVIDIA Analyse abgeschlossen: {analysis.get('root_cause', 'N/A')}",
+            )
+
+            # Keyframes auf Disk speichern
+            keyframe_dir = ARTIFACT_DIR / "fail_keyframes"
+            saved_paths = save_keyframes_to_disk(keyframes, keyframe_dir, prefix="fail")
+            audit(
+                "recorder",
+                message=f"{len(saved_paths)} Keyframes gespeichert in {keyframe_dir}",
+            )
+
+            # Fail-Report generieren
+            report_md = generate_fail_report_markdown(
+                analysis=analysis,
+                run_id=RUN_ID,
+                total_steps=gate.total_steps,
+                last_page_state=gate.last_page_state,
+            )
+
+            # Report lokal speichern
+            save_fail_report_to_disk(
+                report_md=report_md,
+                analysis=analysis,
+                output_dir=ARTIFACT_DIR,
+                run_id=RUN_ID,
+            )
+
+            # Report als GitHub Issue Comment posten (auf Issue #37)
+            posted = post_github_issue_comment(
+                repo="OpenSIN-AI/A2A-SIN-Worker-heypiggy",
+                issue_number=37,
+                comment_body=report_md,
+            )
+            if posted:
+                audit(
+                    "recorder", message="Fail-Report als GitHub Issue Comment gepostet"
+                )
+            else:
+                audit(
+                    "warning",
+                    message="GitHub Issue Comment konnte nicht gepostet werden (gh CLI Fehler oder offline)",
+                )
+
+            # Analyse-Ergebnis in Summary aufnehmen
+            summary["fail_analysis"] = {
+                "root_cause": analysis.get("root_cause", "N/A"),
+                "confidence": analysis.get("confidence_score", 0),
+                "fix_recommendation": analysis.get("fix_recommendation", "N/A"),
+                "keyframes_saved": len(saved_paths),
+            }
+            # Summary-Datei updaten mit Fail-Analyse
+            summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+
+        except Exception as e:
+            audit("error", message=f"Fail-Replay Analyse fehlgeschlagen: {e}")
+
     print(f"\n{'=' * 60}")
     print(f"🏁 LAUF BEENDET — Zusammenfassung:")
     print(f"   Schritte: {gate.total_steps}/{MAX_STEPS}")
@@ -3403,6 +3603,11 @@ async def main():
     print(f"   Screenshots: {summary['screenshots']}")
     print(f"   Artefakte: {ARTIFACT_DIR}")
     print(f"   Audit-Log: {AUDIT_LOG_PATH}")
+    if run_was_fail and "fail_analysis" in summary:
+        fa = summary["fail_analysis"]
+        print(f"   🔴 FAIL Root-Cause: {fa['root_cause']}")
+        print(f"   🔴 FAIL Confidence: {fa['confidence']}")
+        print(f"   🔴 FAIL Fix: {fa['fix_recommendation']}")
     print(f"{'=' * 60}\n")
 
 
