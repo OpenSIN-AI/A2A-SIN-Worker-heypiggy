@@ -18,9 +18,11 @@ import asyncio
 import os
 import sys
 from collections.abc import Sequence
-from typing import Final
+from typing import Any, Final
+from pathlib import Path
 
 from worker._version import __version__
+from worker.checkpoints import find_latest_checkpoint
 from worker.exceptions import (
     ConfigurationError,
     PreflightError,
@@ -76,6 +78,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Initialise config + preflight only, then exit without driving the bridge.",
     )
+    run.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Ignore existing checkpoints and start a fresh run.",
+    )
 
     # --- doctor ------------------------------------------------------------
     sub.add_parser(
@@ -114,7 +121,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return _EXIT_CONFIG_ERROR  # type: ignore[unreachable]
 
 
-def _run_worker(args: argparse.Namespace, log: object) -> int:
+def _run_worker(args: argparse.Namespace, log: Any) -> int:
     """Wire up the async worker loop and translate exceptions into exit codes."""
     # Imports deferred so `--version` / `doctor` never pay the cost.
     from config import load_config_from_env  # legacy module
@@ -123,6 +130,17 @@ def _run_worker(args: argparse.Namespace, log: object) -> int:
 
     if args.run_id:
         os.environ["HEYPIGGY_RUN_ID"] = args.run_id
+
+    if args.fresh:
+        os.environ["HEYPIGGY_FRESH"] = "1"
+        os.environ.pop("HEYPIGGY_RESUME_CHECKPOINT_PATH", None)
+    elif not args.run_id:
+        base_dir = Path(os.environ.get("HEYPIGGY_ARTIFACT_BASE", "/tmp"))
+        latest = find_latest_checkpoint(base_dir)
+        if latest is not None:
+            checkpoint_file, checkpoint = latest
+            os.environ["HEYPIGGY_RUN_ID"] = checkpoint.run_id
+            os.environ["HEYPIGGY_RESUME_CHECKPOINT_PATH"] = str(checkpoint_file)
 
     try:
         cfg = load_config_from_env()
@@ -135,6 +153,15 @@ def _run_worker(args: argparse.Namespace, log: object) -> int:
         return _EXIT_CONFIG_ERROR
 
     set_run_id(cfg.artifacts.run_id)
+
+    if not args.fresh:
+        resume_path = os.environ.get("HEYPIGGY_RESUME_CHECKPOINT_PATH")
+        if resume_path:
+            log.info(  # type: ignore[attr-defined]
+                "worker_resume_requested",
+                run_id=cfg.artifacts.run_id,
+                checkpoint=resume_path,
+            )
 
     with WorkerContext.from_config(cfg) as ctx:
         log.info(  # type: ignore[attr-defined]
@@ -177,7 +204,7 @@ def _run_worker(args: argparse.Namespace, log: object) -> int:
     return _EXIT_OK
 
 
-def _run_doctor(log: object) -> int:
+def _run_doctor(log: Any) -> int:
     """Print a sanity report: version, required env vars, optional deps."""
     required_env = ("NVIDIA_API_KEY", "HEYPIGGY_EMAIL", "HEYPIGGY_PASSWORD")
     missing = [name for name in required_env if not os.environ.get(name)]
