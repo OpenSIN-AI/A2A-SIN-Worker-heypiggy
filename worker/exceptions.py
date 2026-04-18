@@ -83,6 +83,14 @@ class BridgeUnavailableError(BridgeError):
     """The bridge process is not running or not reachable."""
 
 
+class SelectorNotFoundError(WorkerError):
+    """A requested selector key is missing from the loaded sitepack."""
+
+
+class SitepackValidationError(WorkerError):
+    """The loaded sitepack JSON is missing required schema fields."""
+
+
 # ---------------------------------------------------------------------------
 # Vision (NVIDIA NIM)
 # ---------------------------------------------------------------------------
@@ -149,6 +157,8 @@ __all__ = [
     "ConfigurationError",
     "ElementNotFoundError",
     "PreflightError",
+    "SelectorNotFoundError",
+    "SitepackValidationError",
     "ShutdownRequested",
     "VisionCircuitOpenError",
     "VisionError",
