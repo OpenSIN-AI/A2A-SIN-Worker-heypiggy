@@ -588,6 +588,57 @@ class HeyPiggyVisionCacheTests(unittest.TestCase):
 
         self.assertEqual(worker._VISION_CACHE, {})
 
+    def test_cache_bypasses_selector_from_denylist(self):
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "ghost_click",
+            "next_params": {"selector": "#blocked-selector"},
+        }
+        worker._VISION_CACHE[("hash123", "desc")] = dict(decision)
+
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={
+                "recent_failures": [],
+                "issue_counts": {},
+                "denylist": {
+                    "selectors": ["#blocked-selector"],
+                    "action_signatures": [],
+                    "root_cause_keywords": [],
+                },
+            },
+        ):
+            cached = worker._vision_cache_get("hash123", "desc", 2)
+
+        self.assertIsNone(cached)
+
+    def test_cache_bypasses_action_signature_from_denylist(self):
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_ref",
+            "next_params": {"ref": "@e9"},
+        }
+        worker._VISION_CACHE[("hash123", "desc")] = dict(decision)
+        signature = worker._build_action_signature("click_ref", {"ref": "@e9"})
+
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={
+                "recent_failures": [],
+                "issue_counts": {},
+                "denylist": {
+                    "selectors": [],
+                    "action_signatures": [signature],
+                    "root_cause_keywords": [],
+                },
+            },
+        ):
+            cached = worker._vision_cache_get("hash123", "desc", 2)
+
+        self.assertIsNone(cached)
+
 
 class HeyPiggyActionLoopDetectorTests(unittest.TestCase):
     def test_loop_detected_after_three_identical_actions(self):
@@ -814,6 +865,11 @@ class HeyPiggyFailLearningMemoryTests(unittest.TestCase):
                 "loop_detected": 1,
                 "timing_issue": 1,
             },
+            "denylist": {
+                "selectors": ["#survey-123"],
+                "action_signatures": ['click_ref|{"ref": "@e9"}'],
+                "root_cause_keywords": ["fold", "overlay"],
+            },
         }
         with patch.object(worker, "load_fail_learning", return_value=memory):
             context = worker.build_fail_learning_context()
@@ -822,6 +878,121 @@ class HeyPiggyFailLearningMemoryTests(unittest.TestCase):
         self.assertIn("VERMEIDE dieselbe next_action", context)
         self.assertIn("VERMEIDE Sofort-Wiederholungen", context)
         self.assertIn("VERMEIDE blinde Standard-Klicks", context)
+        self.assertIn("HARTE SELECTOR-DENYLIST", context)
+        self.assertIn("RISK KEYWORDS AUS FEHLSCHLÄGEN", context)
+
+    def test_remember_fail_learning_persists_selector_action_and_keyword_denylists(
+        self,
+    ):
+        gate = worker.VisionGateController()
+        gate.failed_selectors = {"#bad-selector": 3}
+        gate.action_history = [
+            ("hash1", "click_ref", '{"ref": "@e9"}'),
+            ("hash1", "click_ref", '{"ref": "@e9"}'),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            memory_path = pathlib.Path(tmpdir) / "fail_learning.json"
+            with patch.object(worker, "FAIL_LEARNING_PATH", memory_path):
+                memory = worker.remember_fail_learning(
+                    {
+                        "root_cause": "Captcha overlay blocked button under the fold",
+                        "selector_issue": True,
+                        "loop_detected": True,
+                    },
+                    "vision_stop",
+                    "error",
+                    gate=gate,
+                )
+
+            denylist = memory["denylist"]
+            self.assertIn("#bad-selector", denylist["selectors"])
+            self.assertIn('click_ref|{"ref": "@e9"}', denylist["action_signatures"])
+            self.assertIn("captcha", denylist["root_cause_keywords"])
+
+    def test_apply_fail_learning_to_decision_blocks_selector_from_denylist(self):
+        gate = worker.VisionGateController()
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "ghost_click",
+            "next_params": {"selector": "#blocked-selector"},
+            "reason": "button sichtbar",
+            "progress": True,
+        }
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={
+                "recent_failures": [],
+                "issue_counts": {},
+                "denylist": {
+                    "selectors": ["#blocked-selector"],
+                    "action_signatures": [],
+                    "root_cause_keywords": [],
+                },
+            },
+        ):
+            adapted = worker.apply_fail_learning_to_decision(decision, gate, "hash1")
+
+        self.assertEqual(adapted["verdict"], "RETRY")
+        self.assertEqual(adapted["next_action"], "none")
+
+    def test_apply_fail_learning_to_decision_blocks_action_signature_from_denylist(
+        self,
+    ):
+        gate = worker.VisionGateController()
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_ref",
+            "next_params": {"ref": "@e9"},
+            "reason": "button sichtbar",
+            "progress": True,
+        }
+        signature = worker._build_action_signature("click_ref", {"ref": "@e9"})
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={
+                "recent_failures": [],
+                "issue_counts": {},
+                "denylist": {
+                    "selectors": [],
+                    "action_signatures": [signature],
+                    "root_cause_keywords": [],
+                },
+            },
+        ):
+            adapted = worker.apply_fail_learning_to_decision(decision, gate, "hash1")
+
+        self.assertEqual(adapted["verdict"], "RETRY")
+        self.assertEqual(adapted["next_action"], "none")
+
+    def test_apply_fail_learning_to_decision_blocks_fragile_click_on_keyword_risk(self):
+        gate = worker.VisionGateController()
+        decision = {
+            "verdict": "PROCEED",
+            "next_action": "click_element",
+            "next_params": {"selector": ".cta"},
+            "reason": "overlay still visible above button",
+            "progress": True,
+        }
+        with patch.object(
+            worker,
+            "load_fail_learning",
+            return_value={
+                "recent_failures": [],
+                "issue_counts": {},
+                "denylist": {
+                    "selectors": [],
+                    "action_signatures": [],
+                    "root_cause_keywords": ["overlay", "captcha"],
+                },
+            },
+        ):
+            adapted = worker.apply_fail_learning_to_decision(decision, gate, "hash1")
+
+        self.assertEqual(adapted["verdict"], "RETRY")
+        self.assertEqual(adapted["next_action"], "none")
 
     def test_get_fail_learning_delay_bounds_expands_after_timing_failures(self):
         with patch.object(

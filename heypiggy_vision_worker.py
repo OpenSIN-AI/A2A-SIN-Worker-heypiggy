@@ -206,6 +206,40 @@ CURRENT_RUN_SUMMARY: RunSummary | None = None
 VISION_CIRCUIT_BREAKER = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
 _VISION_CACHE: dict[tuple[str, str], dict[str, object]] = {}
 FAIL_LEARNING_PATH = Path("/tmp/heypiggy_fail_learning.json")
+FAIL_KEYWORD_STOPWORDS = {
+    "after",
+    "before",
+    "button",
+    "click",
+    "cause",
+    "failed",
+    "failure",
+    "nicht",
+    "problem",
+    "seite",
+    "step",
+    "survey",
+    "that",
+    "the",
+    "this",
+    "under",
+    "unknown",
+    "visible",
+    "war",
+    "with",
+}
+FAIL_RUNTIME_KEYWORDS = {
+    "blocked",
+    "captcha",
+    "clickable",
+    "consent",
+    "cookie",
+    "fold",
+    "hidden",
+    "modal",
+    "overlay",
+    "popup",
+}
 
 # ============================================================================
 # ANSWER HISTORY — Konsistenz über alle Surveys hinweg (NEU in v3.1)
@@ -257,7 +291,15 @@ def load_fail_learning() -> dict[str, object]:
                     return data
         except Exception:
             pass
-    return {"recent_failures": [], "issue_counts": {}}
+    return {
+        "recent_failures": [],
+        "issue_counts": {},
+        "denylist": {
+            "selectors": [],
+            "action_signatures": [],
+            "root_cause_keywords": [],
+        },
+    }
 
 
 def save_fail_learning(data: dict[str, object]) -> None:
@@ -266,12 +308,66 @@ def save_fail_learning(data: dict[str, object]) -> None:
     )
 
 
+def _normalize_denylist_entries(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    out: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _extract_root_cause_keywords(root_cause: str) -> list[str]:
+    keywords: list[str] = []
+    for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{3,}", root_cause.lower()):
+        if token in FAIL_KEYWORD_STOPWORDS:
+            continue
+        if token not in keywords:
+            keywords.append(token)
+    return keywords[:8]
+
+
+def _build_action_signature(action: str, params: dict[str, object]) -> str:
+    return f"{action}|{json.dumps(params, sort_keys=True, ensure_ascii=False)}"
+
+
+def _extract_gate_action_signatures(gate) -> list[str]:
+    if gate is None or not hasattr(gate, "action_history"):
+        return []
+    signatures: list[str] = []
+    for item in list(getattr(gate, "action_history", []))[-3:]:
+        if not isinstance(item, tuple) or len(item) != 3:
+            continue
+        _, action, params_json = item
+        signatures.append(f"{action}|{params_json}")
+    return signatures
+
+
+def _get_fail_denylist() -> dict[str, list[str]]:
+    memory = load_fail_learning()
+    denylist = memory.get("denylist", {})
+    if not isinstance(denylist, dict):
+        return {"selectors": [], "action_signatures": [], "root_cause_keywords": []}
+    return {
+        "selectors": _normalize_denylist_entries(denylist.get("selectors", [])),
+        "action_signatures": _normalize_denylist_entries(
+            denylist.get("action_signatures", [])
+        ),
+        "root_cause_keywords": _normalize_denylist_entries(
+            denylist.get("root_cause_keywords", [])
+        ),
+    }
+
+
 def remember_fail_learning(
-    analysis: dict[str, object], exit_reason: str, final_page_state: str
+    analysis: dict[str, object], exit_reason: str, final_page_state: str, gate=None
 ) -> dict[str, object]:
     memory = load_fail_learning()
     recent_failures = list(memory.get("recent_failures", []))
     issue_counts = dict(memory.get("issue_counts", {}))
+    denylist = _get_fail_denylist()
 
     issue_flags = {
         "captcha_detected": bool(analysis.get("captcha_detected")),
@@ -283,12 +379,37 @@ def remember_fail_learning(
         if enabled:
             issue_counts[key] = int(issue_counts.get(key, 0)) + 1
 
+    selector_candidates = list(denylist["selectors"])
+    selector_candidates.extend(
+        _normalize_denylist_entries(analysis.get("bad_selectors", []))
+    )
+    if (
+        issue_flags["selector_issue"]
+        and gate is not None
+        and hasattr(gate, "failed_selectors")
+    ):
+        selector_candidates.extend(
+            str(selector)
+            for selector in list(getattr(gate, "failed_selectors", {}).keys())
+        )
+
+    action_signature_candidates = list(denylist["action_signatures"])
+    action_signature_candidates.extend(
+        _normalize_denylist_entries(analysis.get("bad_action_signatures", []))
+    )
+    if issue_flags["loop_detected"]:
+        action_signature_candidates.extend(_extract_gate_action_signatures(gate))
+
+    root_cause_text = str(analysis.get("root_cause", "Unbekannt"))
+    keyword_candidates = list(denylist["root_cause_keywords"])
+    keyword_candidates.extend(_extract_root_cause_keywords(root_cause_text))
+
     recent_failures.append(
         {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "exit_reason": exit_reason,
             "page_state": final_page_state,
-            "root_cause": str(analysis.get("root_cause", "Unbekannt")),
+            "root_cause": root_cause_text,
             "fix_recommendation": str(analysis.get("fix_recommendation", "N/A")),
             "affected_step": str(analysis.get("affected_step", "N/A")),
             "issue_flags": issue_flags,
@@ -297,6 +418,13 @@ def remember_fail_learning(
 
     memory["recent_failures"] = recent_failures[-5:]
     memory["issue_counts"] = issue_counts
+    memory["denylist"] = {
+        "selectors": _normalize_denylist_entries(selector_candidates)[-10:],
+        "action_signatures": _normalize_denylist_entries(action_signature_candidates)[
+            -10:
+        ],
+        "root_cause_keywords": _normalize_denylist_entries(keyword_candidates)[-12:],
+    }
     save_fail_learning(memory)
     return memory
 
@@ -304,6 +432,7 @@ def remember_fail_learning(
 def build_fail_learning_context() -> str:
     memory = load_fail_learning()
     recent_failures = memory.get("recent_failures", [])
+    denylist = _get_fail_denylist()
     if not isinstance(recent_failures, list) or not recent_failures:
         return ""
 
@@ -344,6 +473,18 @@ def build_fail_learning_context() -> str:
     ):
         lines.append(
             "- Wenn ein Ziel vermutlich nicht sichtbar/klickbar ist, VERMEIDE blinde Standard-Klicks und bevorzuge scroll_down, ghost_click oder vision_click."
+        )
+    if denylist["selectors"]:
+        lines.append(
+            f"- HARTE SELECTOR-DENYLIST: {', '.join(denylist['selectors'][:4])}"
+        )
+    if denylist["action_signatures"]:
+        lines.append(
+            "- HARTE ACTION-DENYLIST: Wiederhole keine zuvor gescheiterten Action-Signaturen."
+        )
+    if denylist["root_cause_keywords"]:
+        lines.append(
+            f"- RISK KEYWORDS AUS FEHLSCHLÄGEN: {', '.join(denylist['root_cause_keywords'][:6])}"
         )
     return "\n".join(lines)
 
@@ -393,6 +534,17 @@ def _is_fragile_cached_click(decision: dict[str, object]) -> bool:
 
 def _should_bypass_cached_decision(decision: dict[str, object]) -> bool:
     issue_counts = _get_fail_issue_counts()
+    denylist = _get_fail_denylist()
+    raw_params = decision.get("next_params", {})
+    next_params = raw_params if isinstance(raw_params, dict) else {}
+    selector = str(next_params.get("selector", ""))
+    if selector and selector in denylist["selectors"]:
+        return True
+    if (
+        _build_action_signature(str(decision.get("next_action", "none")), next_params)
+        in denylist["action_signatures"]
+    ):
+        return True
     if issue_counts.get("selector_issue", 0) > 0 and _is_fragile_cached_click(decision):
         return True
     if (
@@ -419,6 +571,10 @@ def apply_fail_learning_to_decision(
     next_action = str(decision.get("next_action", "none"))
     raw_params = decision.get("next_params", {})
     next_params = raw_params if isinstance(raw_params, dict) else {}
+    denylist = _get_fail_denylist()
+    selector = str(next_params.get("selector", ""))
+    action_signature = _build_action_signature(next_action, next_params)
+    reason_text = str(decision.get("reason", "")).lower()
 
     memory = load_fail_learning()
     issue_counts = memory.get("issue_counts", {})
@@ -430,6 +586,55 @@ def apply_fail_learning_to_decision(
 
     adapted = dict(decision)
     adapted["next_params"] = dict(next_params)
+
+    if selector and selector in denylist["selectors"]:
+        adapted["verdict"] = "RETRY"
+        adapted["next_action"] = "none"
+        adapted["next_params"] = {}
+        adapted["reason"] = f"Fail-learning denylist blockiert Selector: {selector}"
+        adapted["progress"] = False
+        audit(
+            "warning",
+            message="Fail-learning selector denylist aktiv",
+            selector=selector,
+        )
+        return adapted
+
+    if action_signature in denylist["action_signatures"]:
+        adapted["verdict"] = "RETRY"
+        adapted["next_action"] = "none"
+        adapted["next_params"] = {}
+        adapted["reason"] = (
+            f"Fail-learning denylist blockiert Action-Signatur: {next_action}"
+        )
+        adapted["progress"] = False
+        audit(
+            "warning", message="Fail-learning action denylist aktiv", action=next_action
+        )
+        return adapted
+
+    if (
+        next_action == "click_element"
+        and not str(next_params.get("selector", "")).startswith("#")
+        and any(keyword in reason_text for keyword in denylist["root_cause_keywords"])
+        and any(
+            keyword in FAIL_RUNTIME_KEYWORDS
+            for keyword in denylist["root_cause_keywords"]
+        )
+    ):
+        adapted["verdict"] = "RETRY"
+        adapted["next_action"] = "none"
+        adapted["next_params"] = {}
+        adapted["reason"] = (
+            "Fail-learning root-cause denylist blockiert fragilen Klick bei bekanntem Risiko"
+        )
+        adapted["progress"] = False
+        audit(
+            "warning",
+            message="Fail-learning keyword denylist aktiv",
+            action=next_action,
+        )
+        return adapted
 
     if loop_issues > 0 and gate.record_action(
         screenshot_hash, next_action, next_params
@@ -2874,7 +3079,7 @@ async def _run_fail_replay_analysis(
         keyframe_urls=keyframe_urls,
     )
     report_path = save_fail_report_to_disk(report_md, analysis, output_dir, RUN_ID)
-    remember_fail_learning(analysis, exit_reason, final_page_state)
+    remember_fail_learning(analysis, exit_reason, final_page_state, gate=gate)
 
     repo = os.environ.get("FAIL_REPORT_REPO", "")
     issue_number = os.environ.get("FAIL_REPORT_ISSUE_NUMBER", "")
