@@ -5,7 +5,7 @@ import os
 import pathlib
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 MODULE_PATH = pathlib.Path(__file__).resolve().parents[1] / "heypiggy_vision_worker.py"
@@ -34,17 +34,21 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
         execute_bridge = AsyncMock()
         check_bridge_alive = AsyncMock(return_value=True)
         run_vision_model = AsyncMock(
-            side_effect=AssertionError("vision probe must not run when credentials are missing")
+            side_effect=AssertionError(
+                "vision probe must not run when credentials are missing"
+            )
         )
 
-        with patch.dict(
-            os.environ,
-            {"HEYPIGGY_EMAIL": "", "HEYPIGGY_PASSWORD": ""},
-            clear=False,
-        ), patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)), patch.object(
-            worker, "check_bridge_alive", check_bridge_alive
-        ), patch.object(worker, "run_vision_model", run_vision_model), patch.object(
-            worker, "execute_bridge", execute_bridge
+        with (
+            patch.dict(
+                os.environ,
+                {"HEYPIGGY_EMAIL": "", "HEYPIGGY_PASSWORD": ""},
+                clear=False,
+            ),
+            patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)),
+            patch.object(worker, "check_bridge_alive", check_bridge_alive),
+            patch.object(worker, "run_vision_model", run_vision_model),
+            patch.object(worker, "execute_bridge", execute_bridge),
         ):
             await worker.main()
 
@@ -54,26 +58,30 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_stops_before_browser_mutation_when_vision_auth_fails(self):
         execute_bridge = AsyncMock()
 
-        with patch.dict(
-            os.environ,
-            {
-                "HEYPIGGY_EMAIL": "ops@example.com",
-                "HEYPIGGY_PASSWORD": "secret",
-            },
-            clear=False,
-        ), patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)), patch.object(
-            worker, "check_bridge_alive", AsyncMock(return_value=True)
-        ), patch.object(
-            worker,
-            "run_vision_model",
-            AsyncMock(
-                return_value={
-                    "ok": False,
-                    "auth_failure": True,
-                    "error": "401 invalid authentication credentials",
-                }
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HEYPIGGY_EMAIL": "ops@example.com",
+                    "HEYPIGGY_PASSWORD": "secret",
+                },
+                clear=False,
             ),
-        ), patch.object(worker, "execute_bridge", execute_bridge):
+            patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)),
+            patch.object(worker, "check_bridge_alive", AsyncMock(return_value=True)),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(
+                    return_value={
+                        "ok": False,
+                        "auth_failure": True,
+                        "error": "401 invalid authentication credentials",
+                    }
+                ),
+            ),
+            patch.object(worker, "execute_bridge", execute_bridge),
+        ):
             await worker.main()
 
         execute_bridge.assert_not_awaited()
@@ -81,43 +89,52 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_stops_before_browser_mutation_when_vision_health_fails(self):
         execute_bridge = AsyncMock()
 
-        with patch.dict(
-            os.environ,
-            {
-                "HEYPIGGY_EMAIL": "ops@example.com",
-                "HEYPIGGY_PASSWORD": "secret",
-            },
-            clear=False,
-        ), patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)), patch.object(
-            worker, "check_bridge_alive", AsyncMock(return_value=True)
-        ), patch.object(
-            worker,
-            "run_vision_model",
-            AsyncMock(
-                return_value={
-                    "ok": False,
-                    "auth_failure": True,
-                    "error": "vision health check failed",
-                }
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HEYPIGGY_EMAIL": "ops@example.com",
+                    "HEYPIGGY_PASSWORD": "secret",
+                },
+                clear=False,
             ),
-        ), patch.object(worker, "execute_bridge", execute_bridge):
+            patch.object(worker, "wait_for_extension", AsyncMock(return_value=True)),
+            patch.object(worker, "check_bridge_alive", AsyncMock(return_value=True)),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(
+                    return_value={
+                        "ok": False,
+                        "auth_failure": True,
+                        "error": "vision health check failed",
+                    }
+                ),
+            ),
+            patch.object(worker, "execute_bridge", execute_bridge),
+        ):
             await worker.main()
 
         execute_bridge.assert_not_awaited()
 
     async def test_ask_vision_turns_auth_failure_into_stop(self):
-        with patch.object(worker, "dom_prescan", AsyncMock(return_value="DOM")), patch.object(
-            worker,
-            "run_vision_model",
-            AsyncMock(
-                return_value={
-                    "ok": False,
-                    "auth_failure": True,
-                    "error": "401 invalid authentication credentials",
-                }
+        with (
+            patch.object(worker, "dom_prescan", AsyncMock(return_value="DOM")),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(
+                    return_value={
+                        "ok": False,
+                        "auth_failure": True,
+                        "error": "401 invalid authentication credentials",
+                    }
+                ),
             ),
         ):
-            decision = await worker.ask_vision("/tmp/probe.png", "action", "expected", 1)
+            decision = await worker.ask_vision(
+                "/tmp/probe.png", "action", "expected", 1
+            )
 
         self.assertEqual(decision["verdict"], "STOP")
         self.assertEqual(decision["page_state"], "error")
@@ -159,7 +176,9 @@ class HeyPiggyWorkerVisionTimeoutTests(unittest.IsolatedAsyncioTestCase):
         timeout = 180
         cli_timeout = max(30, timeout - 5)
         self.assertEqual(cli_timeout, 175)
-        self.assertGreater(cli_timeout, 60, "CLI-Timeout muss groß genug für Gemini sein")
+        self.assertGreater(
+            cli_timeout, 60, "CLI-Timeout muss groß genug für Gemini sein"
+        )
 
 
 class HeyPiggyWorkerControllerTests(unittest.TestCase):
@@ -198,10 +217,19 @@ class HeyPiggyWorkerJsonParsingTests(unittest.IsolatedAsyncioTestCase):
             '"reason": "Button sichtbar", "progress": true}\n'
             "Hoffentlich hilft das."
         )
-        with patch.object(worker, "dom_prescan", AsyncMock(return_value="DOM")), patch.object(
-            worker,
-            "run_vision_model",
-            AsyncMock(return_value={"ok": True, "auth_failure": False, "text": prosa_output}),
+        with (
+            patch.object(worker, "dom_prescan", AsyncMock(return_value="DOM")),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(
+                    return_value={
+                        "ok": True,
+                        "auth_failure": False,
+                        "text": prosa_output,
+                    }
+                ),
+            ),
         ):
             decision = await worker.ask_vision("/tmp/x.png", "a", "b", 1)
 
@@ -256,21 +284,29 @@ class HeyPiggyWorkerNvidiaNimTests(unittest.IsolatedAsyncioTestCase):
     async def test_nvidia_nim_parses_openai_compat_response(self):
         """NVIDIA NIM OpenAI-kompatible Response wird korrekt geparst."""
         tmp_path = _write_test_png()
-        fake_response = json.dumps({
-            "id": "cmpl-test",
-            "model": "meta/llama-3.2-90b-vision-instruct",
-            "choices": [{
-                "message": {
-                    "content": '{"verdict":"PROCEED","page_state":"dashboard","next_action":"click_element","next_params":{"selector":"#btn"},"reason":"test","progress":true}',
-                    "role": "assistant",
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"total_tokens": 150},
-        })
+        fake_response = json.dumps(
+            {
+                "id": "cmpl-test",
+                "model": "meta/llama-3.2-90b-vision-instruct",
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"verdict":"PROCEED","page_state":"dashboard","next_action":"click_element","next_params":{"selector":"#btn"},"reason":"test","progress":true}',
+                            "role": "assistant",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"total_tokens": 150},
+            }
+        )
 
-        with patch.object(worker, "NVIDIA_API_KEY", "nvapi-test"), patch(
-            "asyncio.to_thread", new=AsyncMock(return_value=(200, fake_response, ""))
+        with (
+            patch.object(worker, "NVIDIA_API_KEY", "nvapi-test"),
+            patch(
+                "asyncio.to_thread",
+                new=AsyncMock(return_value=(200, fake_response, "")),
+            ),
         ):
             result = await worker._nvidia_nim_chat(
                 "test prompt",
@@ -288,8 +324,11 @@ class HeyPiggyWorkerNvidiaNimTests(unittest.IsolatedAsyncioTestCase):
         """429 Rate-Limit wird als retry-bar markiert, nicht als auth failure."""
         tmp_path = _write_test_png()
 
-        with patch.object(worker, "NVIDIA_API_KEY", "nvapi-test"), patch(
-            "asyncio.to_thread", new=AsyncMock(return_value=(429, "", "rate limit"))
+        with (
+            patch.object(worker, "NVIDIA_API_KEY", "nvapi-test"),
+            patch(
+                "asyncio.to_thread", new=AsyncMock(return_value=(429, "", "rate limit"))
+            ),
         ):
             result = await worker._nvidia_nim_chat(
                 "test",
@@ -305,8 +344,12 @@ class HeyPiggyWorkerNvidiaNimTests(unittest.IsolatedAsyncioTestCase):
     async def test_nvidia_nim_handles_401_as_auth_failure(self):
         """401 → auth_failure=True (Preflight stoppt Worker)."""
         tmp_path = _write_test_png()
-        with patch.object(worker, "NVIDIA_API_KEY", "nvapi-bad"), patch(
-            "asyncio.to_thread", new=AsyncMock(return_value=(401, "", "invalid key"))
+        with (
+            patch.object(worker, "NVIDIA_API_KEY", "nvapi-bad"),
+            patch(
+                "asyncio.to_thread",
+                new=AsyncMock(return_value=(401, "", "invalid key")),
+            ),
         ):
             result = await worker._nvidia_nim_chat(
                 "test",
@@ -321,18 +364,26 @@ class HeyPiggyWorkerNvidiaNimTests(unittest.IsolatedAsyncioTestCase):
         """Mit NVIDIA_API_KEY + VISION_BACKEND=auto → NVIDIA-Pfad wird gewählt."""
         fake_nvidia = AsyncMock(
             return_value={
-                "ok": True, "auth_failure": False,
+                "ok": True,
+                "auth_failure": False,
                 "text": '{"verdict":"PROCEED"}',
-                "stdout_text": "", "stderr_text": "", "returncode": 200,
+                "stdout_text": "",
+                "stderr_text": "",
+                "returncode": 200,
             }
         )
         fake_opencode = AsyncMock(
-            return_value={"ok": False, "auth_failure": True, "error": "should not be called"}
+            return_value={
+                "ok": False,
+                "auth_failure": True,
+                "error": "should not be called",
+            }
         )
-        with patch.object(worker, "NVIDIA_API_KEY", "nvapi-test"), patch.object(
-            worker, "VISION_BACKEND", "auto"
-        ), patch.object(worker, "_run_vision_nvidia", fake_nvidia), patch.object(
-            worker, "_run_vision_opencode", fake_opencode
+        with (
+            patch.object(worker, "NVIDIA_API_KEY", "nvapi-test"),
+            patch.object(worker, "VISION_BACKEND", "auto"),
+            patch.object(worker, "_run_vision_nvidia", fake_nvidia),
+            patch.object(worker, "_run_vision_opencode", fake_opencode),
         ):
             result = await worker.run_vision_model(
                 "prompt", "/tmp/x.png", timeout=30, step_num=1
@@ -347,10 +398,11 @@ class HeyPiggyWorkerNvidiaNimTests(unittest.IsolatedAsyncioTestCase):
         fake_opencode = AsyncMock(
             return_value={"ok": True, "auth_failure": False, "text": "opencode-worked"}
         )
-        with patch.object(worker, "NVIDIA_API_KEY", ""), patch.object(
-            worker, "VISION_BACKEND", "opencode"
-        ), patch.object(worker, "_run_vision_nvidia", fake_nvidia), patch.object(
-            worker, "_run_vision_opencode", fake_opencode
+        with (
+            patch.object(worker, "NVIDIA_API_KEY", ""),
+            patch.object(worker, "VISION_BACKEND", "opencode"),
+            patch.object(worker, "_run_vision_nvidia", fake_nvidia),
+            patch.object(worker, "_run_vision_opencode", fake_opencode),
         ):
             result = await worker.run_vision_model(
                 "prompt", "/tmp/x.png", timeout=30, step_num=1
@@ -369,9 +421,12 @@ class HeyPiggyWorkerNvidiaNimTests(unittest.IsolatedAsyncioTestCase):
             if model == worker.NVIDIA_VISION_MODEL:
                 return {"ok": False, "auth_failure": False, "error": "HTTP 500"}
             return {
-                "ok": True, "auth_failure": False,
+                "ok": True,
+                "auth_failure": False,
                 "text": '{"verdict":"PROCEED"}',
-                "stdout_text": "", "stderr_text": "", "returncode": 200,
+                "stdout_text": "",
+                "stderr_text": "",
+                "returncode": 200,
             }
 
         with patch.object(worker, "_nvidia_nim_chat", side_effect=fake_chat):
@@ -410,9 +465,7 @@ class HeyPiggyVisionCacheTests(unittest.TestCase):
         self.assertIsNone(worker._vision_cache_get("", "desc", 1))
 
     def test_cache_different_action_misses(self):
-        worker._vision_cache_put(
-            "hash123", "click weiter", 1, {"verdict": "PROCEED"}
-        )
+        worker._vision_cache_put("hash123", "click weiter", 1, {"verdict": "PROCEED"})
         self.assertIsNone(worker._vision_cache_get("hash123", "click andere", 2))
 
 
@@ -448,7 +501,9 @@ class HeyPiggyProfileAutofillTests(unittest.TestCase):
         self.assertEqual(out["text"], "jeremy@example.com")
 
     def test_profile_placeholder_resolves_from_profile(self):
-        with patch.object(worker, "USER_PROFILE", {"name": "Jeremy Schulze", "city": "Berlin"}):
+        with patch.object(
+            worker, "USER_PROFILE", {"name": "Jeremy Schulze", "city": "Berlin"}
+        ):
             params = {"selector": "#name", "text": "<NAME>"}
             out = worker.inject_credentials(params, "", "")
         self.assertEqual(out["text"], "Jeremy Schulze")
@@ -469,12 +524,151 @@ class HeyPiggyProfileAutofillTests(unittest.TestCase):
 
     def test_resolve_profile_value_for_vorname(self):
         with patch.object(worker, "USER_PROFILE", {"first_name": "Jeremy"}):
-            self.assertEqual(worker._resolve_profile_value("first-name-input"), "Jeremy")
+            self.assertEqual(
+                worker._resolve_profile_value("first-name-input"), "Jeremy"
+            )
             self.assertEqual(worker._resolve_profile_value("vorname"), "Jeremy")
 
     def test_resolve_profile_value_returns_none_on_mismatch(self):
         with patch.object(worker, "USER_PROFILE", {"city": "Berlin"}):
             self.assertIsNone(worker._resolve_profile_value("some-random-field"))
+
+
+class HeyPiggyFailReplayIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_fail_replay_analysis_writes_report_and_optional_comment(self):
+        frame = MagicMock()
+        frame.png_bytes = b"frame-bytes"
+        frame.step_label = "step_7_click"
+        frame.vision_verdict = "STOP"
+        frame.page_state = "error"
+        recorder = MagicMock()
+        recorder.get_keyframes.return_value = [frame]
+        run_summary = worker.RunSummary(run_id="run-fail")
+        run_summary.total_steps = 7
+        gate = worker.VisionGateController()
+
+        with (
+            patch.object(
+                worker,
+                "save_keyframes_to_disk",
+                return_value=[pathlib.Path("/tmp/keyframe_00.png")],
+            ) as save_frames,
+            patch.object(
+                worker, "upload_to_box", return_value="https://box/frame_00.png"
+            ) as upload,
+            patch.object(
+                worker,
+                "analyze_fail_multiframe",
+                AsyncMock(return_value={"root_cause": "click failed"}),
+            ) as analyze,
+            patch.object(
+                worker, "generate_fail_report_markdown", return_value="report-body"
+            ) as generate,
+            patch.object(
+                worker,
+                "save_fail_report_to_disk",
+                return_value=pathlib.Path("/tmp/fail_report.md"),
+            ) as save_report,
+            patch.object(
+                worker, "post_github_issue_comment", return_value=True
+            ) as post_comment,
+            patch.dict(
+                os.environ,
+                {
+                    "FAIL_REPORT_REPO": "OpenSIN-AI/A2A-SIN-Worker-heypiggy",
+                    "FAIL_REPORT_ISSUE_NUMBER": "43",
+                },
+                clear=False,
+            ),
+        ):
+            report_path = await worker._run_fail_replay_analysis(
+                recorder,
+                run_summary,
+                gate,
+                "vision_stop: click failed",
+                "error",
+            )
+
+        self.assertEqual(report_path, pathlib.Path("/tmp/fail_report.md"))
+        save_frames.assert_called_once()
+        upload.assert_called_once()
+        analyze.assert_awaited_once()
+        generate.assert_called_once()
+        save_report.assert_called_once()
+        post_comment.assert_called_once()
+
+    async def test_finalize_worker_run_skips_fail_replay_for_success(self):
+        run_summary = worker.RunSummary(run_id="run-success")
+        gate = worker.VisionGateController()
+        recorder = MagicMock()
+        recorder.stop = AsyncMock()
+
+        with (
+            patch.object(
+                worker,
+                "_write_structured_run_summary",
+                return_value=pathlib.Path("/tmp/run_summary.json"),
+            ),
+            patch.object(
+                worker,
+                "_run_fail_replay_analysis",
+                AsyncMock(return_value=pathlib.Path("/tmp/fail_report.md")),
+            ) as fail_replay,
+        ):
+            (
+                summary_path,
+                fail_report_path,
+                exit_reason,
+            ) = await worker._finalize_worker_run(
+                run_summary,
+                gate,
+                "vision_done",
+                "dashboard",
+                recorder,
+            )
+
+        self.assertEqual(summary_path, pathlib.Path("/tmp/run_summary.json"))
+        self.assertIsNone(fail_report_path)
+        self.assertEqual(exit_reason, "vision_done")
+        recorder.stop.assert_awaited_once()
+        fail_replay.assert_not_awaited()
+
+    async def test_finalize_worker_run_triggers_fail_replay_for_limit_exit(self):
+        run_summary = worker.RunSummary(run_id="run-limit")
+        gate = worker.VisionGateController()
+        gate.no_progress_count = worker.MAX_NO_PROGRESS
+        recorder = MagicMock()
+        recorder.stop = AsyncMock()
+
+        with (
+            patch.object(
+                worker,
+                "_write_structured_run_summary",
+                return_value=pathlib.Path("/tmp/run_summary.json"),
+            ),
+            patch.object(
+                worker,
+                "_run_fail_replay_analysis",
+                AsyncMock(return_value=pathlib.Path("/tmp/fail_report.md")),
+            ) as fail_replay,
+        ):
+            (
+                summary_path,
+                fail_report_path,
+                exit_reason,
+            ) = await worker._finalize_worker_run(
+                run_summary,
+                gate,
+                "startup",
+                "unknown",
+                recorder,
+            )
+
+        self.assertEqual(summary_path, pathlib.Path("/tmp/run_summary.json"))
+        self.assertEqual(fail_report_path, pathlib.Path("/tmp/fail_report.md"))
+        self.assertEqual(exit_reason, "limit_reached:no_progress")
+        recorder.stop.assert_awaited_once()
+        fail_replay.assert_awaited_once()
 
 
 if __name__ == "__main__":

@@ -55,6 +55,14 @@ from pathlib import Path
 
 from circuit_breaker import CircuitBreaker
 from config import load_config_from_env
+from fail_recorder import ScreenRingRecorder, save_keyframes_to_disk
+from fail_report import (
+    generate_fail_report_markdown,
+    post_github_issue_comment,
+    save_fail_report_to_disk,
+    upload_to_box,
+)
+from nvidia_video_analyzer import analyze_fail_multiframe
 from observability import RunSummary
 
 # Import typed state machine for page state tracking
@@ -2579,6 +2587,118 @@ def _write_structured_run_summary(run_summary: RunSummary, gate) -> Path:
     return summary_path
 
 
+async def _run_fail_replay_analysis(
+    recorder,
+    run_summary: RunSummary,
+    gate,
+    exit_reason: str,
+    final_page_state: str,
+) -> Path | None:
+    if recorder is None:
+        return None
+
+    keyframes = recorder.get_keyframes(WORKER_CONFIG.recorder.keyframes_on_fail)
+    output_dir = ARTIFACT_DIR / "fail_replay"
+    keyframe_paths = save_keyframes_to_disk(keyframes, output_dir, prefix="keyframe")
+    keyframe_urls = []
+    for path in keyframe_paths:
+        uploaded_url = upload_to_box(path)
+        if uploaded_url:
+            keyframe_urls.append(uploaded_url)
+
+    step_annotations = []
+    for frame in keyframes:
+        parts = [frame.step_label, frame.vision_verdict, frame.page_state]
+        step_annotations.append(" | ".join(part for part in parts if part) or "frame")
+
+    fail_context = (
+        f"exit_reason={exit_reason}; total_steps={run_summary.total_steps}; "
+        f"page_state={final_page_state}; retries={getattr(gate, 'consecutive_retries', 0)}; "
+        f"no_progress={getattr(gate, 'no_progress_count', 0)}"
+    )
+
+    analysis = await analyze_fail_multiframe(
+        keyframe_bytes=[frame.png_bytes for frame in keyframes],
+        fail_context=fail_context,
+        nvidia_api_key=NVIDIA_API_KEY,
+        step_annotations=step_annotations,
+        model=NVIDIA_VISION_MODEL,
+        nim_base_url=WORKER_CONFIG.nvidia.base_url,
+        timeout=WORKER_CONFIG.nvidia.timeout,
+        max_image_bytes=WORKER_CONFIG.nvidia.max_inline_bytes,
+    )
+
+    report_md = generate_fail_report_markdown(
+        analysis=analysis,
+        run_id=RUN_ID,
+        total_steps=run_summary.total_steps,
+        last_page_state=final_page_state,
+        keyframe_urls=keyframe_urls,
+    )
+    report_path = save_fail_report_to_disk(report_md, analysis, output_dir, RUN_ID)
+
+    repo = os.environ.get("FAIL_REPORT_REPO", "")
+    issue_number = os.environ.get("FAIL_REPORT_ISSUE_NUMBER", "")
+    comment_posted = False
+    if repo and issue_number.isdigit():
+        comment_posted = post_github_issue_comment(repo, int(issue_number), report_md)
+
+    audit(
+        "fail_replay",
+        report_path=str(report_path),
+        keyframes=len(keyframes),
+        comment_posted=comment_posted,
+        analysis_error=str(analysis.get("error", ""))[:200],
+    )
+    return report_path
+
+
+def _resolve_terminal_exit_reason(exit_reason: str, gate) -> str:
+    if exit_reason != "startup":
+        return exit_reason
+    if gate is None:
+        return "startup"
+    if gate.total_steps >= MAX_STEPS:
+        return "limit_reached:max_steps"
+    if gate.consecutive_retries >= MAX_RETRIES:
+        return "limit_reached:max_retries"
+    if gate.no_progress_count >= MAX_NO_PROGRESS:
+        return "limit_reached:no_progress"
+    return "loop_finished"
+
+
+def _should_generate_fail_replay(exit_reason: str) -> bool:
+    return exit_reason not in {"vision_done", "loop_finished"}
+
+
+async def _finalize_worker_run(
+    run_summary: RunSummary,
+    gate,
+    final_exit_reason: str,
+    final_page_state: str,
+    recorder,
+) -> tuple[Path, Path | None, str]:
+    global CURRENT_RUN_SUMMARY
+
+    resolved_exit_reason = _resolve_terminal_exit_reason(final_exit_reason, gate)
+    if recorder is not None:
+        await recorder.stop()
+
+    run_summary.finalize(exit_reason=resolved_exit_reason, page_state=final_page_state)
+    summary_path = _write_structured_run_summary(run_summary, gate)
+    fail_report_path = None
+    if _should_generate_fail_replay(resolved_exit_reason):
+        fail_report_path = await _run_fail_replay_analysis(
+            recorder,
+            run_summary,
+            gate,
+            resolved_exit_reason,
+            final_page_state,
+        )
+    CURRENT_RUN_SUMMARY = None
+    return summary_path, fail_report_path, resolved_exit_reason
+
+
 # ============================================================================
 # HAUPTSCHLEIFE — Der komplette Vision Gate Loop
 # ============================================================================
@@ -2589,6 +2709,7 @@ async def main():
     run_summary = RunSummary(run_id=RUN_ID)
     CURRENT_RUN_SUMMARY = run_summary
     gate = None
+    recorder = None
     final_exit_reason = "startup"
     final_page_state = "unknown"
 
@@ -2605,9 +2726,9 @@ async def main():
     except Exception as e:
         final_exit_reason = f"bridge_connect_failed: {e}"
         run_summary.bridge_errors += 1
-        run_summary.finalize(exit_reason=final_exit_reason, page_state=final_page_state)
-        _write_structured_run_summary(run_summary, gate)
-        CURRENT_RUN_SUMMARY = None
+        await _finalize_worker_run(
+            run_summary, gate, final_exit_reason, final_page_state, recorder
+        )
         audit("stop", reason=f"Bridge-Verbindung fehlgeschlagen: {e}")
         return
 
@@ -2630,11 +2751,9 @@ async def main():
                 f"preflight_failed: {preflight.get('reason', 'unknown')}"
             )
             run_summary.vision_errors += 1
-            run_summary.finalize(
-                exit_reason=final_exit_reason, page_state=final_page_state
+            await _finalize_worker_run(
+                run_summary, gate, final_exit_reason, final_page_state, recorder
             )
-            _write_structured_run_summary(run_summary, gate)
-            CURRENT_RUN_SUMMARY = None
             return
 
     # Credentials erst NACH erfolgreichem fail-closed Preflight auslesen.
@@ -2645,6 +2764,11 @@ async def main():
 
     # 3. VISION GATE CONTROLLER INITIALISIEREN
     gate = VisionGateController()
+    recorder = ScreenRingRecorder(
+        fps=WORKER_CONFIG.recorder.fps,
+        buffer_seconds=WORKER_CONFIG.recorder.buffer_seconds,
+    )
+    await recorder.start()
 
     # 4. INITIALE NAVIGATION
     action_desc = "Navigiere zu HeyPiggy Dashboard"
@@ -2669,11 +2793,6 @@ async def main():
         else:
             final_exit_reason = "tabs_create_missing_tab_id"
             run_summary.bridge_errors += 1
-            run_summary.finalize(
-                exit_reason=final_exit_reason, page_state=final_page_state
-            )
-            _write_structured_run_summary(run_summary, gate)
-            CURRENT_RUN_SUMMARY = None
             # tabs_create hat keine tabId zurückgegeben — harter Abbruch.
             # KEIN Fallback auf fremde Tabs, da wir sonst einen User-Tab steuern würden.
             audit(
@@ -2681,24 +2800,27 @@ async def main():
                 reason=f"tabs_create hat keine tabId zurückgegeben: {tab_res}. "
                 "Kein Fallback auf aktiven Tab erlaubt.",
             )
+            await _finalize_worker_run(
+                run_summary, gate, final_exit_reason, final_page_state, recorder
+            )
             return
     except Exception as e:
         final_exit_reason = f"initial_navigation_failed: {e}"
         run_summary.bridge_errors += 1
-        run_summary.finalize(exit_reason=final_exit_reason, page_state=final_page_state)
-        _write_structured_run_summary(run_summary, gate)
-        CURRENT_RUN_SUMMARY = None
         audit("stop", reason=f"Initiale Navigation fehlgeschlagen: {e}")
+        await _finalize_worker_run(
+            run_summary, gate, final_exit_reason, final_page_state, recorder
+        )
         return
 
     # Verifikation: CURRENT_TAB_ID muss jetzt gesetzt sein
     if CURRENT_TAB_ID is None:
         final_exit_reason = "missing_current_tab_id_after_init"
         run_summary.bridge_errors += 1
-        run_summary.finalize(exit_reason=final_exit_reason, page_state=final_page_state)
-        _write_structured_run_summary(run_summary, gate)
-        CURRENT_RUN_SUMMARY = None
         audit("stop", reason="CURRENT_TAB_ID ist nach Init immer noch None — Abbruch")
+        await _finalize_worker_run(
+            run_summary, gate, final_exit_reason, final_page_state, recorder
+        )
         return
 
     # Warten auf Seitenlade
@@ -2751,6 +2873,10 @@ async def main():
 
         # Schritt aufzeichnen
         gate.record_step(str(verdict), img_hash or "", final_page_state)
+        if recorder is not None:
+            recorder.annotate_last_frame(
+                f"step_{current_step}_{next_action}", str(verdict), final_page_state
+            )
         run_summary.record_step(
             step_number=current_step,
             verdict=str(verdict),
@@ -2839,6 +2965,8 @@ async def main():
         # WARNUNG: Hier kein "break"! Abbrechen würde weitere ausstehende Surveys verpassen.
         if page_state == "survey_done":
             run_summary.record_survey_completed()
+            if recorder is not None:
+                recorder.clear()
             audit(
                 "success",
                 message="Umfrage vollständig abgeschlossen — Bestätigungsseite erkannt! Warte auf nächste Umfrage.",
@@ -2977,11 +3105,9 @@ async def main():
     # Final Session sichern
     await save_session("final")
 
-    if final_exit_reason == "startup":
-        final_exit_reason = "loop_finished"
-    run_summary.finalize(exit_reason=final_exit_reason, page_state=final_page_state)
-    summary_path = _write_structured_run_summary(run_summary, gate)
-    CURRENT_RUN_SUMMARY = None
+    summary_path, fail_report_path, final_exit_reason = await _finalize_worker_run(
+        run_summary, gate, final_exit_reason, final_page_state, recorder
+    )
     run_summary.print_summary()
 
     print(f"\n{'=' * 60}")
@@ -2992,6 +3118,8 @@ async def main():
     print(f"   Artefakte: {ARTIFACT_DIR}")
     print(f"   Audit-Log: {AUDIT_LOG_PATH}")
     print(f"   Structured Summary: {summary_path}")
+    if fail_report_path is not None:
+        print(f"   Fail Replay Report: {fail_report_path}")
     print(f"{'=' * 60}\n")
 
 
