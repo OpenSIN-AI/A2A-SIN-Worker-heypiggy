@@ -183,7 +183,7 @@ CLICK_ACTIONS = WORKER_CONFIG.click_actions
 NVIDIA_API_KEY = WORKER_CONFIG.nvidia.api_key
 NVIDIA_VISION_MODEL = WORKER_CONFIG.nvidia.primary_model
 NVIDIA_FALLBACK_MODELS = WORKER_CONFIG.nvidia.fallback_models
-VISION_BACKEND = os.environ.get("VISION_BACKEND", "opencode").lower()
+VISION_BACKEND = os.environ.get("VISION_BACKEND", "auto").lower()
 
 # 1x1 PNG als lokaler Vision-Probe. WHY: Die Preflight-Prüfung muss die
 # screenshot-basierte Vision-Authentifizierung testen, BEVOR irgendeine Browser-
@@ -320,21 +320,30 @@ def build_fail_learning_context() -> str:
     lines.append(
         f"- Letzter betroffener Schritt: {last_failure.get('affected_step', 'N/A')}"
     )
+    lines.append("HARTE FAIL-LEARNING REGELN FÜR DIE NÄCHSTE ENTSCHEIDUNG:")
     if int(issue_counts.get("timing_issue", 0)) > 0:
         lines.append(
-            "- Timing-Issues kamen bereits vor: klicke nicht zu früh, prüfe Sichtbarkeit/DOM-Änderung vor Wiederholung."
+            "- VERMEIDE Sofort-Wiederholungen nach Klicks; plane erst Sichtbarkeit/DOM-Änderung oder ein vorsichtiges Warten ein."
         )
     if int(issue_counts.get("selector_issue", 0)) > 0:
         lines.append(
-            "- Selector-Issues kamen bereits vor: bevorzuge click_ref, #id oder bestätigte DOM-Selektoren statt generischer Targets."
+            '- VERMEIDE next_action="click_element" mit generischen .class- oder tag-Selektoren; bevorzuge click_ref, #id + ghost_click oder vision_click.'
         )
     if int(issue_counts.get("loop_detected", 0)) > 0:
         lines.append(
-            "- Loop-Muster kamen bereits vor: wiederhole nicht dieselbe Aktion auf demselben Screen ohne neue Evidenz."
+            "- VERMEIDE dieselbe next_action mit denselben next_params auf demselben Screen; wenn unsicher, gib RETRY mit einer anderen Methode zurück."
         )
     if int(issue_counts.get("captcha_detected", 0)) > 0:
         lines.append(
-            "- Captchas kamen bereits vor: priorisiere Captcha-Erkennung vor Survey-Interaktionen."
+            "- VERMEIDE Survey-Interaktionen solange Captcha/Blocker sichtbar sein könnte; priorisiere zuerst die Entblockung."
+        )
+    last_root_cause = str(last_failure.get("root_cause", ""))
+    if any(
+        hint in last_root_cause.lower()
+        for hint in ("not visible", "unter dem fold", "under the fold", "not clickable")
+    ):
+        lines.append(
+            "- Wenn ein Ziel vermutlich nicht sichtbar/klickbar ist, VERMEIDE blinde Standard-Klicks und bevorzuge scroll_down, ghost_click oder vision_click."
         )
     return "\n".join(lines)
 

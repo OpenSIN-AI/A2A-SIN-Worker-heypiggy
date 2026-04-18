@@ -25,6 +25,16 @@ class WorkerConfigTests(unittest.TestCase):
             cfg.bridge.mcp_url, "https://openjerro-opensin-bridge-mcp.hf.space/mcp"
         )
         self.assertEqual(cfg.vision.model, "google/antigravity-gemini-3-flash")
+        self.assertEqual(
+            cfg.nvidia.primary_model, "nvidia/meta/llama-3.2-11b-vision-instruct"
+        )
+        self.assertEqual(
+            cfg.nvidia.fallback_models,
+            (
+                "nvidia/microsoft/phi-3.5-vision-instruct",
+                "nvidia/microsoft/phi-3-vision-128k-instruct",
+            ),
+        )
         self.assertIn("click_element", cfg.click_actions)
         self.assertIn("vision_click", cfg.click_actions)
 
@@ -97,6 +107,7 @@ class LoadConfigFromEnvTests(unittest.TestCase):
                 "NVIDIA_API_KEY": "nvapi-test",
                 "NVIDIA_NIM_BASE_URL": "https://nim.example/v1",
                 "NVIDIA_PRIMARY_MODEL": "meta/custom-vision",
+                "NVIDIA_FALLBACK_MODELS": "nvidia/microsoft/phi-3.5-vision-instruct,nvidia/microsoft/phi-3-vision-128k-instruct",
                 "NVIDIA_TIMEOUT": "88",
                 "NVIDIA_MAX_INLINE_BYTES": "123456",
                 "RECORDER_FPS": "2.5",
@@ -121,6 +132,13 @@ class LoadConfigFromEnvTests(unittest.TestCase):
         self.assertEqual(cfg.nvidia.api_key, "nvapi-test")
         self.assertEqual(cfg.nvidia.base_url, "https://nim.example/v1")
         self.assertEqual(cfg.nvidia.primary_model, "meta/custom-vision")
+        self.assertEqual(
+            cfg.nvidia.fallback_models,
+            (
+                "nvidia/microsoft/phi-3.5-vision-instruct",
+                "nvidia/microsoft/phi-3-vision-128k-instruct",
+            ),
+        )
         self.assertEqual(cfg.nvidia.timeout, 88)
         self.assertEqual(cfg.nvidia.max_inline_bytes, 123456)
         self.assertEqual(cfg.recorder.fps, 2.5)

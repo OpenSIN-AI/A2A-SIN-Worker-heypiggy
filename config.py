@@ -60,10 +60,10 @@ class NvidiaConfig:
 
     api_key: str = ""
     base_url: str = "https://integrate.api.nvidia.com/v1"
-    primary_model: str = "meta/llama-3.2-90b-vision-instruct"
+    primary_model: str = "nvidia/meta/llama-3.2-11b-vision-instruct"
     fallback_models: tuple[str, ...] = (
-        "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
-        "microsoft/phi-4-multimodal-instruct",
+        "nvidia/microsoft/phi-3.5-vision-instruct",
+        "nvidia/microsoft/phi-3-vision-128k-instruct",
     )
     timeout: int = 120
     max_inline_bytes: int = 150_000
@@ -154,6 +154,12 @@ def load_config_from_env() -> WorkerConfig:
     CONSEQUENCES: Defaults greifen wenn ENV nicht gesetzt. Keine harten Crashes.
     """
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fallback_models_env = os.environ.get("NVIDIA_FALLBACK_MODELS", "")
+    fallback_models = NvidiaConfig.fallback_models
+    if fallback_models_env.strip():
+        fallback_models = tuple(
+            model.strip() for model in fallback_models_env.split(",") if model.strip()
+        )
 
     return WorkerConfig(
         bridge=BridgeConfig(
@@ -185,6 +191,7 @@ def load_config_from_env() -> WorkerConfig:
             primary_model=os.environ.get(
                 "NVIDIA_PRIMARY_MODEL", NvidiaConfig.primary_model
             ),
+            fallback_models=fallback_models,
             timeout=int(os.environ.get("NVIDIA_TIMEOUT", NvidiaConfig.timeout)),
             max_inline_bytes=int(
                 os.environ.get("NVIDIA_MAX_INLINE_BYTES", NvidiaConfig.max_inline_bytes)

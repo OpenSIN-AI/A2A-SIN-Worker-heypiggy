@@ -443,6 +443,25 @@ class HeyPiggyWorkerNvidiaNimTests(unittest.IsolatedAsyncioTestCase):
         fake_opencode.assert_awaited_once()
         fake_nvidia.assert_not_called()
 
+    async def test_run_vision_model_auto_without_key_falls_back_to_opencode(self):
+        fake_nvidia = AsyncMock(return_value={"ok": True, "text": "X"})
+        fake_opencode = AsyncMock(
+            return_value={"ok": True, "auth_failure": False, "text": "opencode-worked"}
+        )
+        with (
+            patch.object(worker, "NVIDIA_API_KEY", ""),
+            patch.object(worker, "VISION_BACKEND", "auto"),
+            patch.object(worker, "_run_vision_nvidia", fake_nvidia),
+            patch.object(worker, "_run_vision_opencode", fake_opencode),
+        ):
+            result = await worker.run_vision_model(
+                "prompt", "/tmp/x.png", timeout=30, step_num=1
+            )
+
+        self.assertEqual(result["text"], "opencode-worked")
+        fake_opencode.assert_awaited_once()
+        fake_nvidia.assert_not_called()
+
     async def test_nvidia_fallback_chain_tries_next_model_on_error(self):
         """Wenn das Primary-Modell 500ert, wird das nächste Modell probiert."""
         tmp_path = _write_test_png()
@@ -779,7 +798,30 @@ class HeyPiggyFailLearningMemoryTests(unittest.TestCase):
 
         self.assertIn("selector mismatch", context)
         self.assertIn("use click_ref", context)
-        self.assertIn("Loop-Muster", context)
+        self.assertIn("VERMEIDE dieselbe next_action", context)
+
+    def test_build_fail_learning_context_contains_explicit_action_avoidance_rules(self):
+        memory = {
+            "recent_failures": [
+                {
+                    "root_cause": "Button was not visible under the fold",
+                    "fix_recommendation": "scroll before clicking",
+                    "affected_step": "step 9",
+                }
+            ],
+            "issue_counts": {
+                "selector_issue": 1,
+                "loop_detected": 1,
+                "timing_issue": 1,
+            },
+        }
+        with patch.object(worker, "load_fail_learning", return_value=memory):
+            context = worker.build_fail_learning_context()
+
+        self.assertIn('VERMEIDE next_action="click_element"', context)
+        self.assertIn("VERMEIDE dieselbe next_action", context)
+        self.assertIn("VERMEIDE Sofort-Wiederholungen", context)
+        self.assertIn("VERMEIDE blinde Standard-Klicks", context)
 
     def test_get_fail_learning_delay_bounds_expands_after_timing_failures(self):
         with patch.object(
