@@ -36,6 +36,7 @@ worker/bridge_contract.py
 worker/checkpoints.py
 worker/cli.py
 worker/context.py
+worker/debug_trace.py
 worker/exceptions.py
 worker/logging.py
 worker/loop.py

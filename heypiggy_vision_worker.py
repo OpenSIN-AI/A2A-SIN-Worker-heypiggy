@@ -106,6 +106,16 @@ from platform_profile import active as _active_platform
 from bridge_retry import call_with_retry as _bridge_call_with_retry
 from budget_guard import BudgetGuard
 
+# Debug tracing (opt-in via WORKER_DEBUG_TRACE=1). Adds a bounded ring
+# buffer of bridge calls that is dumped to disk when the vision retry
+# cap is hit. When the flag is off, every hook below is effectively a
+# single boolean read and a no-op. See worker/debug_trace.py.
+from worker.debug_trace import (
+    TRACE_ENABLED as _DEBUG_TRACE_ENABLED,
+    dump_on_vision_cap as _debug_dump_on_vision_cap,
+    get_trace as _debug_get_trace,
+)
+
 # Import typed state machine for page state tracking
 from state_machine import page_state_machine
 
@@ -1834,6 +1844,11 @@ async def execute_bridge(method: str, params: dict[str, object] | None = None):
     """
     started_at = time.time()
     call_params = params or {}
+    # Result captured for the debug tracer in the finally block. Never
+    # consulted on the happy path; kept as a closure-local to avoid
+    # leaking through early-return paths.
+    _trace_result: object = None
+    _trace_ok: bool = False
 
     # WHY: Methoden die Seiteneffekte erzeugen wie "click_ref" oder "type_text"
     # sollten NICHT automatisch retried werden — der erste Aufruf koennte
@@ -1906,13 +1921,38 @@ async def execute_bridge(method: str, params: dict[str, object] | None = None):
                     )
                     result = decode_mcp_result(retry_raw)
 
+        _trace_result = result
+        # A bridge call is considered "ok" for tracing when the response
+        # is not an explicit error dict. Treating a connection-level
+        # failure and an explicit {"error": "..."} return value the same
+        # lets the post-mortem dump reveal silent failures too.
+        _trace_ok = not (isinstance(result, dict) and result.get("error"))
         return result
     except Exception as e:
         audit("error", message=f"execute_bridge({method}) failed: {e}")
-        return {"error": str(e)}
+        err_result = {"error": str(e)}
+        _trace_result = err_result
+        _trace_ok = False
+        return err_result
     finally:
+        duration_s = time.time() - started_at
         if CURRENT_RUN_SUMMARY is not None:
-            CURRENT_RUN_SUMMARY.record_bridge_call(time.time() - started_at)
+            CURRENT_RUN_SUMMARY.record_bridge_call(duration_s)
+        # Record into the process-wide ring buffer. The recorder is a
+        # no-op when WORKER_DEBUG_TRACE is unset, so this costs a single
+        # boolean read in the happy path.
+        if _DEBUG_TRACE_ENABLED:
+            try:
+                _debug_get_trace().record(
+                    method=method,
+                    params=call_params,
+                    result=_trace_result,
+                    duration_ms=duration_s * 1000.0,
+                    ok=_trace_ok,
+                )
+            except Exception:
+                # Tracer must never crash the caller. Swallow silently.
+                pass
 
 
 async def check_bridge_alive():
@@ -5284,6 +5324,25 @@ async def _finalize_worker_run(
             resolved_exit_reason,
             final_page_state,
         )
+        # Debug-tracing crash dump. Only runs when the operator opted
+        # in via WORKER_DEBUG_TRACE=1. Gives a post-mortem JSON with
+        # the last ~20 bridge calls (method, duration, ok, redacted
+        # params, result preview). See worker/debug_trace.py.
+        if _DEBUG_TRACE_ENABLED:
+            try:
+                attempts = (
+                    gate.consecutive_retries
+                    if gate is not None and hasattr(gate, "consecutive_retries")
+                    else -1
+                )
+                dump_path = _debug_dump_on_vision_cap(
+                    attempts=attempts,
+                    last_error=resolved_exit_reason,
+                )
+                if dump_path:
+                    audit("debug_trace_dump", path=dump_path, reason=resolved_exit_reason)
+            except Exception as exc:
+                audit("debug_trace_dump_error", error=str(exc)[:200])
     CURRENT_RUN_SUMMARY = None
     return summary_path, fail_report_path, resolved_exit_reason
 
