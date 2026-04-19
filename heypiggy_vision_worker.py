@@ -2036,16 +2036,26 @@ async def dom_prescan():
         audit("error", message=f"Snapshot fehlgeschlagen: {e}")
 
     # 2. Echte HTML-Elemente mit Klick-Potential scannen
+    # WHY (Issue #61 Fix F3): Frueher wurde der kombinierte Selektor auf 25
+    # Elemente gekappt. Auf dem HeyPiggy-Dashboard erschlagen Navbar-Links,
+    # Filter-Buttons, Footer-Links und das Profil-Menue die eigentlichen
+    # Survey-Kacheln (div.survey-item mit id=#survey-XXXXXXXX). Ergebnis:
+    # Vision bekommt keine Ref-IDs fuer die Kacheln und klickt ins Nichts.
+    # CONSEQUENCES: Zweistufiger Scan:
+    #   1) Survey-Kacheln zuerst, OHNE Limit (in der Praxis max. 20 Karten)
+    #   2) Generische klickbare Elemente, auf 25 gekappt
+    # So sind Survey-Karten immer oben im Prompt — auch wenn darueber 40+
+    # Nav-Elemente sitzen.
     clickable_info = ""
     try:
         js_scan = """
         (function() {
             var results = [];
-            var all = document.querySelectorAll('[onclick], [role="button"], a[href], button, input[type="submit"], [style*="cursor: pointer"], .survey-item, .survey-card, [class*="card"], [class*="survey"]');
-            for (var i = 0; i < Math.min(all.length, 25); i++) {
-                var el = all[i];
+            var seenElements = [];
+
+            function describe(el) {
                 var r = el.getBoundingClientRect();
-                if (r.width < 5 || r.height < 5) continue;
+                if (r.width < 5 || r.height < 5) return null;
                 var sel = '';
                 if (el.id) sel = '#' + el.id;
                 else if (el.className && typeof el.className === 'string') {
@@ -2053,7 +2063,7 @@ async def dom_prescan():
                     if (cls) sel = el.tagName.toLowerCase() + '.' + cls;
                 }
                 if (!sel) sel = el.tagName.toLowerCase();
-                results.push({
+                return {
                     sel: sel,
                     tag: el.tagName,
                     id: el.id || '',
@@ -2064,7 +2074,37 @@ async def dom_prescan():
                     w: Math.round(r.width),
                     h: Math.round(r.height),
                     cursor: getComputedStyle(el).cursor
-                });
+                };
+            }
+
+            // STUFE 1: Survey-Kacheln PRIORITAER (kein Limit, aber Dedup)
+            var surveyCards = document.querySelectorAll(
+                'div.survey-item, [id^="survey-"], .survey-card, [data-survey-id]'
+            );
+            for (var s = 0; s < surveyCards.length; s++) {
+                var card = surveyCards[s];
+                if (seenElements.indexOf(card) !== -1) continue;
+                var info = describe(card);
+                if (!info) continue;
+                info.priority = 'survey';
+                results.push(info);
+                seenElements.push(card);
+            }
+
+            // STUFE 2: Generische klickbare Elemente, auf 25 gekappt
+            var all = document.querySelectorAll(
+                '[onclick], [role="button"], a[href], button, input[type="submit"], [style*="cursor: pointer"], [class*="card"], [class*="survey"]'
+            );
+            var added = 0;
+            for (var i = 0; i < all.length && added < 25; i++) {
+                var el = all[i];
+                if (seenElements.indexOf(el) !== -1) continue;
+                var info2 = describe(el);
+                if (!info2) continue;
+                info2.priority = 'generic';
+                results.push(info2);
+                seenElements.push(el);
+                added++;
             }
             return results;
         })();
@@ -2074,20 +2114,32 @@ async def dom_prescan():
             elements = scan_result["result"]
             if isinstance(elements, list) and elements:
                 lines = []
+                survey_count = 0
                 for el in elements:
                     selector = el.get("sel", "?")
                     if el.get("id"):
                         selector = f"#{el['id']}"
                     text = el.get("text", "")[:40]
+                    # priority=survey markiert Survey-Kacheln (Issue #61 F3).
+                    # Wird in clickable_info als Substring ausgegeben, damit
+                    # der Dashboard-DOM-Check (F2) darauf matchen kann.
+                    prio = el.get("priority", "generic")
+                    if prio == "survey":
+                        survey_count += 1
                     lines.append(
-                        f'  - selector="{selector}" text="{text}" pos=({el.get("x")},{el.get("y")}) size={el.get("w")}x{el.get("h")} cursor={el.get("cursor")}'
+                        f'  - priority={prio} selector="{selector}" text="{text}" '
+                        f'pos=({el.get("x")},{el.get("y")}) size={el.get("w")}x{el.get("h")} '
+                        f'cursor={el.get("cursor")}'
                     )
                 clickable_info = (
                     "KLICKBARE ELEMENTE AUF DER SEITE (ECHTE CSS-Selektoren!):\n" + "\n".join(lines)
                 )
                 audit(
                     "action",
-                    message=f"DOM Pre-Scan: {len(elements)} clickable elements found",
+                    message=(
+                        f"DOM Pre-Scan: {len(elements)} clickable elements "
+                        f"({survey_count} survey cards) found"
+                    ),
                 )
     except Exception as e:
         audit("error", message=f"Clickable scan fehlgeschlagen: {e}")
@@ -2626,8 +2678,17 @@ async def dom_prescan():
     # LUKRATIVSTE zuerst klicken — nicht die erstbeste. Reward/Minute +
     # Sterne-Bewertung sind die Ziel-Metriken. Ohne diese Heuristik verplempert
     # der Agent Zeit in 0.03 EUR Screenern und ignoriert die 0.76 EUR Karten.
-    # CONSEQUENCES: Nur aktiv auf heypiggy.com /?page=dashboard (kein Rating-
-    # oder Survey-State). Schreibt Top-3 Kacheln mit Ref-IDs in den Prompt.
+    #
+    # WHY (Issue #61 Fix F2): Frueher war der Block an `?page=dashboard` in
+    # der URL gebunden. Google-OAuth redirected aber auf `/` oder
+    # `/?tab=surveys` — Folge: Block blieb stumm, Vision bekam keine Ref-IDs,
+    # Worker klickte nie eine Kachel. Jetzt aktivieren wir den Block auf
+    # jeder heypiggy.com-Seite, die KEINE Survey-Detail-URL (/survey/...) ist
+    # UND auf der tatsaechlich div.survey-item-Kacheln im DOM sichtbar sind.
+    # Der DOM-Check (siehe clickable_info) garantiert, dass wir nicht auf
+    # einer Login- oder Profil-Seite irrtuemlich das Ranking anwerfen.
+    # CONSEQUENCES: Block laeuft auf Homepage, ?page=dashboard UND
+    # ?tab=surveys — ueberall wo Kacheln tatsaechlich da sind.
     dashboard_block = ""
     try:
         current_url = (
@@ -2638,10 +2699,24 @@ async def dom_prescan():
     # Fallback: url aus page_context-String extrahieren
     if not current_url and "heypiggy" in (page_context or "").lower():
         current_url = "heypiggy"
+    current_url_low = current_url.lower()
+    page_context_low = (page_context or "").lower()
+    # URL-Heuristik: heypiggy-Domain + KEINE Survey-Detail-Seite
+    _on_heypiggy = ("heypiggy.com" in current_url_low) or ("heypiggy" in page_context_low)
+    _is_survey_detail = (
+        "/survey/" in current_url_low
+        or "/s/" in current_url_low
+        or "survey_id=" in current_url_low
+    )
+    # DOM-Signal: wurden im Clickable-Scan tatsaechlich Survey-Kacheln gefunden?
+    # (Stufe 1 des js_scan schreibt priority='survey' in die Elemente.)
+    _dom_has_survey_cards = "priority=survey" in (clickable_info or "") or "#survey-" in (
+        clickable_info or ""
+    )
     is_dashboard = (
-        ("heypiggy.com" in current_url.lower() or "heypiggy" in (page_context or "").lower())
-        and "page=dashboard" in (page_context or "").lower()
-    ) or ("Deine verfügbaren Erhebungen".lower() in (page_context or "").lower())
+        (_on_heypiggy and not _is_survey_detail and _dom_has_survey_cards)
+        or ("Deine verfügbaren Erhebungen".lower() in page_context_low)
+    )
     # Rating/Survey/Obstacle-Pages nicht ueberschreiben
     if is_dashboard and _LAST_OBSTACLE_KIND is None and _LAST_RATING_PAGE is None:
         try:
@@ -5664,10 +5739,102 @@ async def main():
             _google_login_attempted = True
             audit("google_login_proactive", result=_google_result)
             if _google_result.get("ok"):
-                await human_delay(4.0, 7.0)
+                # Issue #61 Fix F4: Google-OAuth hat 3-5 Redirect-Hops
+                # (account-picker → consent → callback → heypiggy). Bei
+                # langsamer Leitung vergehen 10-15 s. Der alte Wert 4-7 s
+                # war zu knapp — der Loop startete oft mitten im Redirect.
+                await human_delay(8.0, 14.0)
                 await save_session("after_google_login")
     except Exception as _gle:
         audit("google_login_proactive_error", error=str(_gle))
+
+    # Issue #61 Fix F1 + F4 + F5: POST-LOGIN BOOTSTRAP
+    # WHY: Nach erfolgreichem Login (oder erfolgreichem Session-Restore) muss
+    # der Worker deterministisch auf einer Survey-Seite landen. Frueher
+    # wurde die Navigation komplett Vision ueberlassen, was in der Praxis
+    # regelmaessig gescheitert ist:
+    #   - OAuth-Redirect landet auf `/` oder `/?tab=surveys`, nicht auf
+    #     `/?page=dashboard` → Dashboard-Ranking-Block blieb stumm
+    #   - SurveyOrchestrator.begin() wurde nie aufgerufen → die allererste
+    #     Umfrage musste Vision komplett solo finden
+    # CONSEQUENCES: Wir (1) warten auf URL-Stabilitaet (dreimal gleiche
+    # URL in Folge), (2) navigieren explizit zum Dashboard falls wir
+    # ausserhalb sind, (3) rufen orch.begin() auf, das via Dashboard-
+    # Ranking + ghost_click die lukrativste Kachel oeffnet.
+    async def _wait_for_url_stable(max_wait_sec: float = 12.0) -> str:
+        """Wartet bis die URL dreimal in Folge gleich bleibt (Redirects fertig)."""
+        deadline = time.monotonic() + max_wait_sec
+        last_url = ""
+        same_streak = 0
+        while time.monotonic() < deadline:
+            try:
+                res = await execute_bridge(
+                    "execute_javascript",
+                    {"script": "document.location.href", **_tab_params()},
+                )
+                url = ""
+                if isinstance(res, dict):
+                    url = str(res.get("result", "") or "")
+                if url and url == last_url:
+                    same_streak += 1
+                    if same_streak >= 2:  # 3 gleiche Messungen → stabil
+                        return url
+                else:
+                    same_streak = 0
+                    last_url = url
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+        return last_url
+
+    try:
+        stable_url = await _wait_for_url_stable(max_wait_sec=12.0)
+        audit("post_login_url_stable", url=stable_url or "(unknown)")
+
+        _is_heypiggy = "heypiggy.com" in (stable_url or "").lower()
+        _is_survey_detail = (
+            "/survey/" in (stable_url or "").lower()
+            or "/s/" in (stable_url or "").lower()
+        )
+        _is_google_oauth = "accounts.google." in (stable_url or "").lower()
+
+        # Wenn wir weder auf heypiggy noch auf einer Survey-Detail-Page sind,
+        # navigieren wir explizit zum konfigurierten Dashboard. Das greift
+        # z.B. wenn OAuth auf einem "Welcome"-Screen haengen bleibt.
+        if not _is_heypiggy or _is_google_oauth:
+            _dashboard_url = WORKER_CONFIG.queue.dashboard_url
+            audit("post_login_force_navigate", target=_dashboard_url)
+            try:
+                await execute_bridge(
+                    "navigate",
+                    {"url": _dashboard_url, **_tab_params()},
+                )
+                await human_delay(3.0, 5.0)
+            except Exception as _ne:
+                audit("post_login_navigate_error", error=str(_ne))
+
+        # Nur wenn wir NICHT bereits auf einer Survey-Detail-Page sind, soll
+        # der Orchestrator die erste Umfrage oeffnen. Falls wir via
+        # Session-Restore direkt in einer laufenden Umfrage landen, wollen
+        # wir sie nicht verlassen.
+        if SURVEY_ORCHESTRATOR is not None and not _is_survey_detail:
+            try:
+                first_record = await SURVEY_ORCHESTRATOR.begin()
+                if first_record is not None:
+                    audit(
+                        "orchestrator_begin_ok",
+                        index=first_record.index,
+                        start_url=first_record.start_url,
+                    )
+                    await human_delay(2.5, 4.5)
+                else:
+                    audit("orchestrator_begin_no_survey_found")
+            except Exception as _be:
+                audit("orchestrator_begin_error", error=str(_be))
+        elif _is_survey_detail:
+            audit("post_login_already_on_survey", url=stable_url)
+    except Exception as _pb:
+        audit("post_login_bootstrap_error", error=str(_pb))
 
     # 5. VISION GATE LOOP — Das Herzstück
     while gate.should_continue():
