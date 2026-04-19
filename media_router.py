@@ -151,9 +151,7 @@ class MediaSnapshot:
 
     @property
     def has_media(self) -> bool:
-        return bool(
-            self.audio_urls or self.video_urls or self.image_urls or self.embed_urls
-        )
+        return bool(self.audio_urls or self.video_urls or self.image_urls or self.embed_urls)
 
     @property
     def summary_line(self) -> str:
@@ -195,8 +193,7 @@ class MediaAnalysis:
             return ""
         lines: list[str] = [
             "=" * 70,
-            f"MEDIA-ANALYSE ({self.snapshot.summary_line}, "
-            f"benötigte {self.elapsed_sec:.1f}s):",
+            f"MEDIA-ANALYSE ({self.snapshot.summary_line}, benötigte {self.elapsed_sec:.1f}s):",
             "=" * 70,
         ]
         for idx, transcript in enumerate(self.audio_transcripts, 1):
@@ -384,8 +381,18 @@ class MediaRouter:
 
     async def scan_and_analyze(self) -> MediaAnalysis:
         """Convenience: scan_page() + analyze() in einem Aufruf."""
+        import os
+
         snap = await self.scan_page()
         if not snap.has_media:
+            # Media-Bypass (Issue #59): wenn SKIP_MEDIA_IF_NOT_FOUND=1 und kein
+            # Media auf der Seite — sofort zurück ohne NVIDIA-API-Call.
+            # WHY: Spart 200-800ms pro Schritt (kein HTTP-Call) wenn Surveys keine
+            #      Audio/Video-Fragen haben — das ist der häufigste Fall.
+            # CONSEQUENCES: Bei echter Audio/Video-Frage: scan_page() findet die
+            #               Elemente und has_media=True → normaler Analyse-Pfad.
+            if os.environ.get("SKIP_MEDIA_IF_NOT_FOUND", "1") != "0":
+                return MediaAnalysis(snapshot=snap, elapsed_sec=0.0)
             return MediaAnalysis(snapshot=snap, elapsed_sec=0.0)
         return await self.analyze(snap)
 

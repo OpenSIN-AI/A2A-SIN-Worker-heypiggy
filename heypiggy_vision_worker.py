@@ -1348,7 +1348,7 @@ async def ensure_worker_preflight() -> dict:
 
     probe_path = ensure_vision_probe_screenshot()
     probe_prompt = (
-        "Antworte ausschließlich mit gültigem JSON im Format " '{"status":"ok"}. Keine Erklärungen.'
+        'Antworte ausschließlich mit gültigem JSON im Format {"status":"ok"}. Keine Erklärungen.'
     )
     probe_result = await run_vision_model(
         probe_prompt,
@@ -2009,9 +2009,9 @@ async def take_screenshot(step_num: int, label: str = ""):
 
 async def dom_prescan():
     """
-    Scannt die aktuelle Seite nach klickbaren Elementen und liefert echte Selektoren.
-WHY: Das Vision-LLM DARF NIEMALS CSS-Selektoren raten! Es muss die echten kennen.
-CONSEQUENCES: Ohne Pre-Scan schlaegt das LLM Fantasie-Selektoren wie :has-text() vor.
+        Scannt die aktuelle Seite nach klickbaren Elementen und liefert echte Selektoren.
+    WHY: Das Vision-LLM DARF NIEMALS CSS-Selektoren raten! Es muss die echten kennen.
+    CONSEQUENCES: Ohne Pre-Scan schlaegt das LLM Fantasie-Selektoren wie :has-text() vor.
     """
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
@@ -2233,7 +2233,11 @@ CONSEQUENCES: Ohne Pre-Scan schlaegt das LLM Fantasie-Selektoren wie :has-text()
             q_text = (qdata.get("question") or "").strip()
             q_opts = qdata.get("options") or []
             if isinstance(q_opts, list):
-                q_opts = [str(o).strip() for o in q_opts if isinstance(o, (str, int, float)) and str(o).strip()]
+                q_opts = [
+                    str(o).strip()
+                    for o in q_opts
+                    if isinstance(o, (str, int, float)) and str(o).strip()
+                ]
             else:
                 q_opts = []
             progress = (qdata.get("progress") or "").strip()
@@ -2626,7 +2630,9 @@ CONSEQUENCES: Ohne Pre-Scan schlaegt das LLM Fantasie-Selektoren wie :has-text()
     # oder Survey-State). Schreibt Top-3 Kacheln mit Ref-IDs in den Prompt.
     dashboard_block = ""
     try:
-        current_url = page_context_data.get("url", "") if isinstance(page_context_data, dict) else ""
+        current_url = (
+            page_context_data.get("url", "") if isinstance(page_context_data, dict) else ""
+        )
     except NameError:
         current_url = ""
     # Fallback: url aus page_context-String extrahieren
@@ -2715,7 +2721,9 @@ CONSEQUENCES: Ohne Pre-Scan schlaegt das LLM Fantasie-Selektoren wie :has-text()
               return { cards: cards.slice(0, 5), total: cards.length };
             })();
             """
-            dres = await execute_bridge("execute_javascript", {"script": dashboard_js, **tab_params})
+            dres = await execute_bridge(
+                "execute_javascript", {"script": dashboard_js, **tab_params}
+            )
             ddata = dres.get("result") if isinstance(dres, dict) else None
             if isinstance(ddata, dict):
                 cards = ddata.get("cards") or []
@@ -2968,8 +2976,8 @@ CONSEQUENCES: Ohne Pre-Scan schlaegt das LLM Fantasie-Selektoren wie :has-text()
                 if jitter:
                     jittered_count += 1
                 lines.append(
-                    f"  - '{stmt[:90]}' -> ref={target.get('ref','')} "
-                    f"({target.get('label','')}) [{tag}]"
+                    f"  - '{stmt[:90]}' -> ref={target.get('ref', '')} "
+                    f"({target.get('label', '')}) [{tag}]"
                 )
             lines.append(
                 "REGEL: Klicke FUER JEDE ZEILE genau ein Radio — "
@@ -3312,9 +3320,7 @@ CONSEQUENCES: Ohne Pre-Scan schlaegt das LLM Fantasie-Selektoren wie :has-text()
           };
         })();
         """
-        mres = await execute_bridge(
-            "execute_javascript", {"script": mega_js, **tab_params}
-        )
+        mres = await execute_bridge("execute_javascript", {"script": mega_js, **tab_params})
         if isinstance(mres, dict) and isinstance(mres.get("result"), dict):
             _mega = mres["result"]
     except Exception as e:
@@ -3349,7 +3355,7 @@ CONSEQUENCES: Ohne Pre-Scan schlaegt das LLM Fantasie-Selektoren wie :has-text()
                 ]
                 for e in empties[:10]:
                     lines.append(
-                        f"  - {e.get('tag','?')}[{e.get('type','')}] '{e.get('label','')}' ref={e.get('ref','')}"
+                        f"  - {e.get('tag', '?')}[{e.get('type', '')}] '{e.get('label', '')}' ref={e.get('ref', '')}"
                     )
                 lines.append(
                     "REGEL: Beantworte diese Felder zuerst (Persona-konform), "
@@ -3710,9 +3716,7 @@ def _build_persona_answer_hint(
 
     if matched:
         if isinstance(matched, list):
-            lines.append(
-                f"PFLICHT-OPTIONEN (multi-select): {', '.join(str(m) for m in matched)}"
-            )
+            lines.append(f"PFLICHT-OPTIONEN (multi-select): {', '.join(str(m) for m in matched)}")
         else:
             lines.append(f"PFLICHT-OPTION (genau diese klicken): {matched}")
     if raw not in (None, "", 0, [], ()):
@@ -3877,9 +3881,7 @@ async def ask_vision(screenshot_path: str, action_desc: str, expected: str, step
         _collect_recent_answers(limit=8),
     )
     brain_block = build_brain_prompt_block(_BRAIN_PRIME_CONTEXT or PrimeContext())
-    persona_hint_block = _build_persona_answer_hint(
-        _LAST_QUESTION_TEXT, _LAST_QUESTION_OPTIONS
-    )
+    persona_hint_block = _build_persona_answer_hint(_LAST_QUESTION_TEXT, _LAST_QUESTION_OPTIONS)
     consistency_block = _build_consistency_block(_LAST_QUESTION_TEXT)
     trap_rules_block = _TRAP_DETECTION_RULES_PROMPT
 
@@ -4606,9 +4608,7 @@ async def save_session(label: str):
         params = _tab_params()
         cookies = await execute_bridge("export_all_cookies", params)
         session_file = SESSION_DIR / f"session_{label}_{RUN_ID}.json"
-        session_file.write_text(
-            json.dumps(cookies, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        session_file.write_text(json.dumps(cookies, indent=2, ensure_ascii=False), encoding="utf-8")
         audit("session_save", label=label, path=str(session_file))
     except Exception as e:
         audit("error", message=f"Session-Backup fehlgeschlagen: {e}")
@@ -4872,6 +4872,121 @@ def _resolve_profile_value(field_hint: str) -> str | None:
 # ============================================================================
 # CREDENTIAL INJECTION — Sichere Ersetzung von Platzhaltern
 # ============================================================================
+
+
+async def attempt_google_login(email: str) -> dict:
+    """
+    Klickt den 'Mit Google anmelden' Button auf heypiggy.com/login und
+    wählt das Jeremy-Schulze-Profil aus dem Google-Account-Picker.
+
+    WHY: HeyPiggy nutzt primär Google OAuth. Email+Password-Login ist ein
+         Fallback, aber Google-Login ist schneller und vermeidet CAPTCHA.
+         Jeremy Schulze ist im Chrome-Profil gespeichert und wird automatisch
+         vorgeschlagen — kein Passwort-Eingabe nötig.
+    CONSEQUENCES: Schlägt fehl → Worker fällt auf Email+Password-Fallback zurück.
+                  Kein Crash, kein harter Abbruch.
+    """
+    tab_params = _tab_params()
+    audit("google_login_start", email=email[:20] + "..." if email else "")
+
+    try:
+        google_btn_js = """
+(function() {
+    var btns = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+    var googleBtn = btns.find(function(el) {
+        var text = (el.textContent || el.innerText || '').toLowerCase().trim();
+        var hasGoogleIcon = el.querySelector('[class*="google"], svg, img[alt*="Google"]');
+        return (text.includes('google') || text.includes('mit google') || hasGoogleIcon) &&
+               el.offsetParent !== null;
+    });
+    if (!googleBtn) {
+        var linkBtns = Array.from(document.querySelectorAll('[href*="google"], [data-provider="google"]'));
+        googleBtn = linkBtns.find(el => el.offsetParent !== null);
+    }
+    if (googleBtn) {
+        return {
+            found: true,
+            text: (googleBtn.textContent || '').trim().substring(0, 80),
+            tag: googleBtn.tagName,
+            id: googleBtn.id || '',
+            cls: (googleBtn.className || '').toString().substring(0, 80)
+        };
+    }
+    return {found: false};
+})();
+"""
+        scan = await execute_bridge("execute_javascript", {"script": google_btn_js, **tab_params})
+        found_data = {}
+        if isinstance(scan, dict):
+            found_data = scan.get("result", {}) or {}
+
+        if not found_data.get("found"):
+            audit(
+                "google_login_no_button",
+                message="Kein Google-Login-Button gefunden, Fallback auf Email+Password",
+            )
+            return {"ok": False, "reason": "no_google_button"}
+
+        audit("google_login_button_found", text=found_data.get("text", "")[:60])
+
+        click_js = """
+(function() {
+    var btns = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+    var googleBtn = btns.find(function(el) {
+        var text = (el.textContent || el.innerText || '').toLowerCase().trim();
+        var hasGoogleIcon = el.querySelector('[class*="google"], svg, img[alt*="Google"]');
+        return (text.includes('google') || text.includes('mit google') || hasGoogleIcon) &&
+               el.offsetParent !== null;
+    });
+    if (!googleBtn) {
+        var linkBtns = Array.from(document.querySelectorAll('[href*="google"], [data-provider="google"]'));
+        googleBtn = linkBtns.find(el => el.offsetParent !== null);
+    }
+    if (googleBtn) {
+        googleBtn.click();
+        return {clicked: true};
+    }
+    return {clicked: false};
+})();
+"""
+        await execute_bridge("execute_javascript", {"script": click_js, **tab_params})
+        await human_delay(3.0, 5.0)
+
+        # Google Account-Picker: Das richtige Profil wählen
+        # Der Popup-Tab enthält accounts.google.com — wir suchen nach dem Email
+        account_js = f"""
+(function() {{
+    var targetEmail = {repr(email or "")};
+    var items = Array.from(document.querySelectorAll('[data-email], [data-identifier], .account-name, .email'));
+    var match = items.find(function(el) {{
+        var txt = (el.getAttribute('data-email') || el.getAttribute('data-identifier') || el.textContent || '').toLowerCase();
+        return txt.includes(targetEmail.toLowerCase());
+    }});
+    if (match) {{
+        match.click();
+        return {{selected: true, email: targetEmail}};
+    }}
+    // Fallback: ersten Account wählen wenn nur einer vorhanden
+    var firstAccount = document.querySelector('[data-email], .account-name, [jsname="Njthtb"]');
+    if (firstAccount) {{
+        firstAccount.click();
+        return {{selected: true, first_account: true}};
+    }}
+    return {{selected: false}};
+}})();
+"""
+        await human_delay(1.5, 3.0)
+        account_result = await execute_bridge(
+            "execute_javascript", {"script": account_js, **tab_params}
+        )
+        audit("google_account_picker", result=str(account_result)[:120])
+
+        await human_delay(4.0, 7.0)
+        return {"ok": True, "reason": "google_login_clicked"}
+
+    except Exception as e:
+        audit("google_login_error", error=str(e))
+        return {"ok": False, "reason": str(e)}
 
 
 def inject_credentials(params: dict, email: str, pwd: str) -> dict:
@@ -5225,6 +5340,7 @@ async def main():
             # Nur den URL-Path ohne Query fragen (Query-Params wechseln pro Session)
             try:
                 from urllib.parse import urlparse
+
                 pu = urlparse(url)
                 key_url = f"{pu.scheme}://{pu.netloc}{pu.path}"
             except Exception:
@@ -5273,9 +5389,7 @@ async def main():
 
     if persona_cfg.enabled and persona_cfg.username:
         try:
-            ACTIVE_PERSONA = load_persona(
-                persona_cfg.username, Path(persona_cfg.profiles_dir)
-            )
+            ACTIVE_PERSONA = load_persona(persona_cfg.username, Path(persona_cfg.profiles_dir))
             if ACTIVE_PERSONA is not None:
                 audit(
                     "persona_loaded",
@@ -5369,6 +5483,125 @@ async def main():
     # Warten auf Seitenlade
     await human_delay(4.0, 6.0)
 
+    # =========================================================================
+    # STEALTH LAYER — Browser-Fingerprint Masking (Issue #57)
+    # WHY: HeyPiggy und Panel-Anbieter (PureSpectrum, Dynata, Cint) messen
+    #      navigator.webdriver, Canvas-Fingerprints, WebGL-Renderer und
+    #      fehlende Chrome-APIs um Bots zu erkennen. Ohne Masking werden wir
+    #      sofort als Bot markiert → Account-Sperre / DQ auf allen Surveys.
+    # CONSEQUENCES: Dieses JS wird einmalig nach Tab-Create injiziert und
+    #               maskiert die häufigsten Browser-Fingerprint-Vektoren.
+    #               Es darf NIEMALS Fehler werfen (try/catch um alles).
+    # =========================================================================
+    try:
+        stealth_js = """
+(function() {
+    'use strict';
+    try {
+        // 1. webdriver-Flag entfernen — das wichtigste Anti-Bot-Signal
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+            configurable: true
+        });
+    } catch(e) {}
+
+    try {
+        // 2. Chrome-Objekt simulieren (fehlt bei CDP-kontrollierten Browsern)
+        if (!window.chrome) {
+            window.chrome = {
+                runtime: {
+                    onMessage: { addListener: function() {} },
+                    connect: function() { return { onMessage: { addListener: function() {} }, postMessage: function() {} }; }
+                },
+                loadTimes: function() { return {}; },
+                csi: function() { return {}; }
+            };
+        }
+    } catch(e) {}
+
+    try {
+        // 3. Canvas-Fingerprint-Noise — minimale zufällige Pixel-Variation
+        //    damit jeder Fingerprint-Hash leicht anders ist
+        const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
+            const ctx = this.getContext('2d');
+            if (ctx) {
+                const imageData = ctx.getImageData(0, 0, this.width || 1, this.height || 1);
+                const d = imageData.data;
+                // Ändere einen zufälligen Alpha-Wert minimal (±1) — unsichtbar aber ändert Hash
+                const idx = (Math.floor(Math.random() * (d.length / 4))) * 4 + 3;
+                if (d[idx] !== undefined) d[idx] = Math.max(0, Math.min(255, d[idx] + (Math.random() > 0.5 ? 1 : -1)));
+                ctx.putImageData(imageData, 0, 0);
+            }
+            return origToDataURL.apply(this, arguments);
+        };
+    } catch(e) {}
+
+    try {
+        // 4. WebGL-Renderer/Vendor verschleiern
+        const origGetParam = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(param) {
+            if (param === 37445) return 'Intel Inc.';       // UNMASKED_VENDOR_WEBGL
+            if (param === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+            return origGetParam.apply(this, arguments);
+        };
+    } catch(e) {}
+
+    try {
+        // 5. Plugins-Array simulieren (echte Browser haben Plugins, CDP-Browser nicht)
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => {
+                const p = [
+                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+                ];
+                p.item = (i) => p[i];
+                p.namedItem = (n) => p.find(x => x.name === n) || null;
+                p.refresh = () => {};
+                return p;
+            },
+            configurable: true
+        });
+    } catch(e) {}
+
+    try {
+        // 6. languages setzen (Deutsch/Österreich-Profil für Jeremy Schulze)
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['de-DE', 'de', 'en-US', 'en'],
+            configurable: true
+        });
+    } catch(e) {}
+
+    try {
+        // 7. Permissions-API mocken damit permission-basierte Bot-Detection greift
+        const origQuery = window.navigator.permissions && window.navigator.permissions.query;
+        if (origQuery) {
+            navigator.permissions.query = function(params) {
+                if (params.name === 'notifications') {
+                    return Promise.resolve({ state: Notification.permission });
+                }
+                return origQuery.apply(this, arguments);
+            };
+        }
+    } catch(e) {}
+
+    return { stealth: 'ok', ts: Date.now() };
+})();
+"""
+        stealth_result = await execute_bridge(
+            "execute_javascript",
+            {"script": stealth_js, **_tab_params()},
+        )
+        audit(
+            "stealth_injected",
+            result=str(stealth_result)[:120],
+            message="Stealth Layer aktiv: webdriver/canvas/webgl/plugins maskiert",
+        )
+    except Exception as se:
+        # Stealth-Fehler darf den Worker NIEMALS stoppen
+        audit("stealth_inject_error", error=str(se))
+
     # Cross-Run-Session wiederherstellen BEVOR wir uns einloggen.
     # WHY: Der Cache enthaelt Cookies + LocalStorage der letzten Panel-Logins
     # (HeyPiggy, PureSpectrum, Dynata, Sapio, Cint, Lucid). Wenn die noch
@@ -5408,6 +5641,30 @@ async def main():
 
     # Session direkt nach Laden sichern (und persistenten Cache aktualisieren)
     await save_session("initial_load")
+
+    # Google-Login-Versuch (Issue #58): Wenn noch kein aktiver Login,
+    # klicke proaktiv den Google-Button BEVOR der Vision-Loop startet.
+    # WHY: Schneller als Vision-gesteuerten Login abzuwarten — vermeidet
+    #      mehrere Retry-Loops nur für den Login-Screen.
+    # CONSEQUENCES: Bei Fehler ignorieren — Vision-Loop übernimmt den Login.
+    _google_login_attempted = False
+    try:
+        _url_check_js = "document.location.href"
+        _url_res = await execute_bridge(
+            "execute_javascript", {"script": _url_check_js, **_tab_params()}
+        )
+        _current_url = ""
+        if isinstance(_url_res, dict):
+            _current_url = str(_url_res.get("result", "") or "")
+        if "login" in _current_url or "signin" in _current_url or not _current_url:
+            _google_result = await attempt_google_login(email or "")
+            _google_login_attempted = True
+            audit("google_login_proactive", result=_google_result)
+            if _google_result.get("ok"):
+                await human_delay(4.0, 7.0)
+                await save_session("after_google_login")
+    except Exception as _gle:
+        audit("google_login_proactive_error", error=str(_gle))
 
     # 5. VISION GATE LOOP — Das Herzstück
     while gate.should_continue():
@@ -5600,7 +5857,8 @@ async def main():
             _reason_low = str(reason or decision.get("reason", "")).lower()
             is_dq = (
                 "disqualif" in _reason_low
-                or "screen" in _reason_low and "out" in _reason_low
+                or "screen" in _reason_low
+                and "out" in _reason_low
                 or "nicht teilnehmen" in _reason_low
                 or "kein passender" in _reason_low
             )
@@ -5687,7 +5945,9 @@ async def main():
                     # (das waere eine DQ und ruiniert die Trust-Scores). Der
                     # Survey-Boundary ist der sichere Cut-Point.
                     if BUDGET_GUARD is not None and BUDGET_GUARD.tripped():
-                        final_exit_reason = f"budget_tripped: {BUDGET_GUARD.trip_reason or 'limit_reached'}"
+                        final_exit_reason = (
+                            f"budget_tripped: {BUDGET_GUARD.trip_reason or 'limit_reached'}"
+                        )
                         audit(
                             "budget_shutdown",
                             reason=BUDGET_GUARD.trip_reason,
@@ -5868,7 +6128,9 @@ async def main():
                             audit(
                                 "native_select_fallback",
                                 selector=selector[:60],
-                                reason=result.get("reason") if isinstance(result, dict) else "unknown",
+                                reason=result.get("reason")
+                                if isinstance(result, dict)
+                                else "unknown",
                             )
                             await execute_bridge("select_option", sel_params)
                     except Exception as se:
@@ -5906,9 +6168,7 @@ async def main():
                 if text and len(text) <= 400:
                     for idx, ch in enumerate(text):
                         try:
-                            await execute_bridge(
-                                "keyboard", {"keys": [ch], **_tab_params()}
-                            )
+                            await execute_bridge("keyboard", {"keys": [ch], **_tab_params()})
                         except Exception:
                             # Fallback auf ganzes type_text falls keyboard-Einzelchar fehlschlaegt
                             await execute_bridge("type_text", params)
@@ -5965,13 +6225,17 @@ async def main():
         #      beantworten koennen (Maria, zweite Session, etc.).
         # CONSEQUENCES: Wir nutzen question_text + answer_text aus der Vision-JSON
         # falls verfuegbar, sonst Fallback auf DOM-Scan + reason.
-        if page_state in (
-            "survey_active",
-            "survey_audio",
-            "survey_video",
-            "survey_image",
-            "onboarding",
-        ) and next_action in CLICK_ACTIONS:
+        if (
+            page_state
+            in (
+                "survey_active",
+                "survey_audio",
+                "survey_video",
+                "survey_image",
+                "onboarding",
+            )
+            and next_action in CLICK_ACTIONS
+        ):
             vision_question = str(decision.get("question_text") or "").strip()
             vision_answer = str(decision.get("answer_text") or "").strip()
             vision_topic = str(decision.get("question_topic") or "").strip() or None
@@ -5979,9 +6243,7 @@ async def main():
 
             # Fallback-Quellen fuer die Frage
             question_final = (
-                vision_question
-                or (_LAST_QUESTION_TEXT or "").strip()
-                or f"step_{gate.total_steps}"
+                vision_question or (_LAST_QUESTION_TEXT or "").strip() or f"step_{gate.total_steps}"
             )
             # Fallback-Quellen fuer die Antwort
             answer_final = (
