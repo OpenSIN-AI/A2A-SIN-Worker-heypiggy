@@ -17,7 +17,11 @@ permissions:
 
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
-  PIP_NO_CACHE_DIR: "off"
+  # PIP_NO_CACHE_DIR intentionally unset here: actions/setup-python@v5
+  # runs `pip cache dir` for its caching layer, and setting this var to
+  # any truthy value (including the string "off") disables pip's cache
+  # entirely and makes setup-python fail. If you ever need to force
+  # no-cache for a single step, set it inline on that step only.
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
