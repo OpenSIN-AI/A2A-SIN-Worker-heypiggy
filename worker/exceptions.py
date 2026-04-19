@@ -126,6 +126,30 @@ class ActionBlockedError(ActionError):
 
 
 # ---------------------------------------------------------------------------
+# Sitepack (site-specific selector packs)
+#
+# Sitepack errors are action-adjacent but distinct: they mean the pack
+# configuration itself is wrong (SitepackValidationError) or references a
+# selector/flow/page-signature that is not declared in the active pack
+# (SelectorNotFoundError). They are imported by worker.sitepack and the
+# corresponding tests; adding them here closes the half-merged refactor
+# that broke the CI test collection step.
+# ---------------------------------------------------------------------------
+
+
+class SitepackValidationError(ActionError):
+    """The sitepack payload failed structural validation.
+
+    Raised when the JSON is not an object, required top-level keys are
+    missing or empty, ``flows`` entries are not lists of URLs, etc.
+    """
+
+
+class SelectorNotFoundError(ActionError):
+    """A selector key was requested that is not declared in the sitepack."""
+
+
+# ---------------------------------------------------------------------------
 # Cooperative shutdown
 # ---------------------------------------------------------------------------
 
@@ -149,7 +173,9 @@ __all__ = [
     "ConfigurationError",
     "ElementNotFoundError",
     "PreflightError",
+    "SelectorNotFoundError",
     "ShutdownRequested",
+    "SitepackValidationError",
     "VisionCircuitOpenError",
     "VisionError",
     "VisionRateLimitError",
