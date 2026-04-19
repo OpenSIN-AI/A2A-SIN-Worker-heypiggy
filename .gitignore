@@ -17,3 +17,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.egg-info/
+
+# Secondary repo checkouts used by v0 agent for cross-repo work.
+.bridge-work/
