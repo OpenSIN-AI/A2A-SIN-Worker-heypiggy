@@ -8,3 +8,12 @@ node_modules
 .next/
 .env*.local
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+*.egg-info/
