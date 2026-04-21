@@ -1,8 +1,8 @@
 # ================================================================================
 # DATEI: state_machine.py
 # PROJEKT: A2A-SIN-Worker-heyPiggy (OpenSIN AI Agent System)
-# ZWECK: 
-# WICHTIG FÜR ENTWICKLER: 
+# ZWECK:
+# WICHTIG FÜR ENTWICKLER:
 #   - Ändere nichts ohne zu verstehen was passiert
 #   - Jeder Kommentar erklärt WARUM etwas getan wird, nicht nur WAS
 #   - Bei Fragen erst Code lesen, dann ändern
@@ -51,11 +51,11 @@ class PageState(Enum):
 class TransitionRule:
     # ========================================================================
     # KLASSE: TransitionRule
-    # ZWECK: 
-    # WICHTIG: 
-    # METHODEN: 
+    # ZWECK:
+    # WICHTIG:
+    # METHODEN:
     # ========================================================================
-    
+
     """Defines an allowed transition with optional condition."""
 
     from_state: PageState
@@ -85,17 +85,6 @@ class StateMachine:
     def add_transition(
         self, from_state: PageState, to_state: PageState, condition: Callable = None
     ):
-    # -------------------------------------------------------------------------
-    # FUNKTION: add_transition
-    # PARAMETER: 
-        self, from_state: PageState, to_state: PageState, condition: Callable = None
-    
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
-    # -------------------------------------------------------------------------
-    
         """Register an allowed transition."""
         self._transitions.add((from_state, to_state))
 

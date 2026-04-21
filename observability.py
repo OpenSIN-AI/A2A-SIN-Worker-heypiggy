@@ -2,8 +2,8 @@
 # ================================================================================
 # DATEI: observability.py
 # PROJEKT: A2A-SIN-Worker-heyPiggy (OpenSIN AI Agent System)
-# ZWECK: 
-# WICHTIG FÜR ENTWICKLER: 
+# ZWECK:
+# WICHTIG FÜR ENTWICKLER:
 #   - Ändere nichts ohne zu verstehen was passiert
 #   - Jeder Kommentar erklärt WARUM etwas getan wird, nicht nur WAS
 #   - Bei Fragen erst Code lesen, dann ändern
@@ -51,11 +51,11 @@ class StepMetric:
 class RunSummary:
     # ========================================================================
     # KLASSE: RunSummary
-    # ZWECK: 
-    # WICHTIG: 
-    # METHODEN: 
+    # ZWECK:
+    # WICHTIG:
+    # METHODEN:
     # ========================================================================
-    
+
     """
     Aggregierte Metriken für einen kompletten Worker-Run.
     WHY: Am Ende jedes Runs brauchen wir eine Zusammenfassung:
@@ -113,24 +113,6 @@ class RunSummary:
         success: bool = True,
         error: str = "",
     ):
-    # -------------------------------------------------------------------------
-    # FUNKTION: record_step
-    # PARAMETER: 
-        self,
-        step_number: int,
-        verdict: str,
-        page_state: str,
-        action: str = "",
-        duration: float = 0.0,
-        success: bool = True,
-        error: str = "",
-    
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
-    # -------------------------------------------------------------------------
-    
         """
         Zeichnet einen Schritt auf.
         WHY: Zentrale Methode statt verstreuter Zähler-Inkremente.
@@ -162,15 +144,15 @@ class RunSummary:
         )
 
     def record_vision_call(self, duration_seconds: float):
-    # -------------------------------------------------------------------------
-    # FUNKTION: record_vision_call
-    # PARAMETER: self, duration_seconds: float
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
-    # -------------------------------------------------------------------------
-    
+        # -------------------------------------------------------------------------
+        # FUNKTION: record_vision_call
+        # PARAMETER: self, duration_seconds: float
+        # ZWECK:
+        # WAS PASSIERT HIER:
+        # WARUM DIESER WEG:
+        # ACHTUNG:
+        # -------------------------------------------------------------------------
+
         """Zeichnet einen Vision-API-Call auf (Timing)."""
         self.total_vision_calls += 1
         self.total_vision_time_seconds += duration_seconds
@@ -206,15 +188,15 @@ class RunSummary:
         return True
 
     def finalize(self, exit_reason: str = "", page_state: str = ""):
-    # -------------------------------------------------------------------------
-    # FUNKTION: finalize
-    # PARAMETER: self, exit_reason: str = "", page_state: str = ""
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
-    # -------------------------------------------------------------------------
-    
+        # -------------------------------------------------------------------------
+        # FUNKTION: finalize
+        # PARAMETER: self, exit_reason: str = "", page_state: str = ""
+        # ZWECK:
+        # WAS PASSIERT HIER:
+        # WARUM DIESER WEG:
+        # ACHTUNG:
+        # -------------------------------------------------------------------------
+
         """
         Finalisiert den Run (setzt end_time und Exit-Info).
         WHY: Muss am Ende des Runs einmal aufgerufen werden.
@@ -298,15 +280,15 @@ class RunSummary:
         return d
 
     def save_to_file(self, path: Path, include_steps: bool = True):
-    # -------------------------------------------------------------------------
-    # FUNKTION: save_to_file
-    # PARAMETER: self, path: Path, include_steps: bool = True
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
-    # -------------------------------------------------------------------------
-    
+        # -------------------------------------------------------------------------
+        # FUNKTION: save_to_file
+        # PARAMETER: self, path: Path, include_steps: bool = True
+        # ZWECK:
+        # WAS PASSIERT HIER:
+        # WARUM DIESER WEG:
+        # ACHTUNG:
+        # -------------------------------------------------------------------------
+
         """
         Speichert den RunSummary als JSON-Datei.
         WHY: Persistente Metriken für Post-Mortem und Trend-Analyse.
@@ -319,15 +301,15 @@ class RunSummary:
         )
 
     def print_summary(self):
-    # -------------------------------------------------------------------------
-    # FUNKTION: print_summary
-    # PARAMETER: self
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
-    # -------------------------------------------------------------------------
-    
+        # -------------------------------------------------------------------------
+        # FUNKTION: print_summary
+        # PARAMETER: self
+        # ZWECK:
+        # WAS PASSIERT HIER:
+        # WARUM DIESER WEG:
+        # ACHTUNG:
+        # -------------------------------------------------------------------------
+
         """Gibt eine kompakte Zusammenfassung auf stdout aus."""
         d = self.duration_seconds
         mins = int(d // 60)
