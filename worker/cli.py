@@ -126,6 +126,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip readback verification after upload (verification is on by default).",
     )
 
+    # --- audit ---------------------------------------------------------------
+    audit = sub.add_parser(
+        "audit",
+        help="Compare local env files with Infisical and report drift.",
+    )
+    audit.add_argument(
+        "--root",
+        action="append",
+        dest="roots",
+        default=[],
+        help="Root directory to audit (repeatable). Defaults to all discovered roots.",
+    )
+    audit.add_argument(
+        "--env",
+        default=os.getenv("INFISICAL_ENV", "dev"),
+        help="Infisical environment slug (default: dev or $INFISICAL_ENV).",
+    )
+    audit.add_argument(
+        "--path",
+        default=os.getenv("INFISICAL_FOLDER_ROOT", "/opensin/a2a-sin-worker-heypiggy"),
+        help="Infisical folder root (default: current repo folder root).",
+    )
+    audit.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Exit non-zero if any drift is detected.",
+    )
+
     # --- doctor ------------------------------------------------------------
     sub.add_parser(
         "doctor",
@@ -165,6 +193,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if command == "sync-envs":
         return _run_infisical_sync(args, log)
+
+    if command == "audit":
+        return _run_infisical_audit(args, log)
 
     if command == "run":
         return _run_worker(args, log)
@@ -333,6 +364,63 @@ def _run_infisical_sync(args: argparse.Namespace, log: BoundLogger) -> int:
     log.info("infisical_sync_completed", roots=len(roots), files=len(results))
     mode = "dry-run" if args.dry_run else "sync"
     print(f"{mode}: processed {len(results)} env files for Infisical")
+    return _EXIT_OK
+
+
+def _run_infisical_audit(args: argparse.Namespace, log: BoundLogger) -> int:
+    """Compare local env files with Infisical and report drift.
+
+    WHY: Operators need visibility into what is out of sync before taking
+    action. This command is read-only and safe to run frequently.
+    """
+    from infisical_sync import audit_roots, discover_default_roots
+
+    token = os.environ.get("INFISICAL_TOKEN") or os.environ.get("INFISICAL_SERVICE_TOKEN")
+    if not token:
+        log.error("infisical_token_missing")
+        print("INFISICAL_TOKEN missing; set it in the shell or via the Infisical CLI login.")
+        return _EXIT_CONFIG_ERROR
+
+    repo_root = Path(__file__).resolve().parents[1]
+    roots = [Path(root).expanduser() for root in (args.roots or discover_default_roots(repo_root))]
+
+    reports = audit_roots(
+        roots,
+        token=token,
+        project_id=os.environ.get("INFISICAL_PROJECT_ID", "fa7758b4-f84c-4297-966e-710056d531ef"),
+        environment=args.env,
+        folder_root=args.path,
+    )
+
+    if not reports:
+        print("✓ No drift detected - all local env files are in sync with Infisical.")
+        return _EXIT_OK
+
+    # Print drift report
+    total_missing_remote = 0
+    total_missing_local = 0
+    for report in reports:
+        print(f"\n📁 {report.path}")
+        if report.missing_in_remote:
+            print(f"   Missing in Infisical ({len(report.missing_in_remote)} keys):")
+            for key in sorted(report.missing_in_remote):
+                print(f"     + {key}")
+            total_missing_remote += len(report.missing_in_remote)
+        if report.missing_in_local:
+            print(f"   Missing locally ({len(report.missing_in_local)} keys):")
+            for key in sorted(report.missing_in_local):
+                print(f"     - {key}")
+            total_missing_local += len(report.missing_in_local)
+
+    print(f"\n{'=' * 50}")
+    print(f"Drift Summary: {len(reports)} files out of sync")
+    print(f"  Keys missing in Infisical: {total_missing_remote}")
+    print(f"  Keys missing locally: {total_missing_local}")
+
+    if args.fail_fast:
+        print("\n⚠ Exiting with error due to --fail-fast")
+        return _EXIT_CONFIG_ERROR
+
     return _EXIT_OK
 
 

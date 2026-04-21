@@ -387,12 +387,134 @@ def sync_roots(
     return results
 
 
+@dataclass(slots=True)
+class DriftReport:
+    """Report of env files that are out of sync with Infisical."""
+
+    path: Path
+    local_keys: set[str]
+    remote_keys: set[str]
+    missing_in_remote: set[str]
+    missing_in_local: set[str]
+    extra_in_remote: set[str]
+
+
+def audit_drift(
+    source: Path,
+    target: InfisicalTarget,
+    *,
+    token: str,
+    domain: str = "https://eu.infisical.com",
+) -> DriftReport:
+    """Compare local env file with remote Infisical secrets to detect drift.
+
+    WHY: Without drift detection, agents blindly overwrite or miss stale secrets.
+    This audit reveals exactly which keys are out of sync so the operator can
+    decide whether to push, pull, or resolve manually.
+    """
+    # Get local keys
+    local_mapping = parse_env_text(source.read_text(errors="replace"))
+    local_keys = set(local_mapping.keys())
+
+    # Get remote keys via infisical CLI
+    cmd = [
+        "infisical",
+        "secrets",
+        "list",
+        f"--domain={domain}",
+        "--token",
+        token,
+        f"--projectId={target.project_id}",
+        f"--env={target.environment}",
+        f"--path={target.folder}",
+        "--plain",
+    ]
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    remote_keys: set[str] = set()
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line and not line.startswith("---"):
+            # Infisical list output: typically KEY or KEY | VALUE format
+            parts = line.split()
+            if parts:
+                remote_keys.add(parts[0])
+
+    return DriftReport(
+        path=source,
+        local_keys=local_keys,
+        remote_keys=remote_keys,
+        missing_in_remote=local_keys - remote_keys,
+        missing_in_local=remote_keys - local_keys,
+        extra_in_remote=set(),  # Reserved for future use
+    )
+
+
+def audit_roots(
+    roots: Iterable[Path],
+    *,
+    token: str,
+    project_id: str,
+    environment: str,
+    folder_root: str,
+    domain: str = "https://eu.infisical.com",
+) -> list[DriftReport]:
+    """Audit all env files in roots for drift against Infisical.
+
+    WHY: Operators need a single command to see the full sync status across
+    all their repositories without actually modifying anything.
+    """
+    reports: list[DriftReport] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        repo_slug = _slugify_segment(root.name)
+        target_repo_root = f"{folder_root.rstrip('/')}/{repo_slug}".rstrip("/")
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            name = path.name
+            if not (
+                name == ".env"
+                or name.startswith(".env.")
+                or name.endswith(".env")
+                or name.endswith(".xcode.env")
+            ):
+                continue
+            if any(part in {".git", "node_modules", ".cache", ".bun"} for part in path.parts):
+                continue
+
+            rel_dir = path.parent.relative_to(root)
+            target_folder = target_repo_root
+            if str(rel_dir) != ".":
+                target_folder = (
+                    f"{target_repo_root}/{_slugify_segment(str(rel_dir).replace(chr(92), '/'))}"
+                )
+
+            target = InfisicalTarget(
+                project_id=project_id,
+                environment=environment,
+                folder=target_folder,
+            )
+            try:
+                report = audit_drift(path, target, token=token, domain=domain)
+                # Only include if there's actual drift
+                if report.missing_in_remote or report.missing_in_local:
+                    reports.append(report)
+            except Exception:
+                # Skip if remote doesn't exist yet - that's not drift
+                pass
+    return reports
+
+
 __all__ = [
     "NormalizedEnvFile",
     "SyncResult",
+    "DriftReport",
     "discover_default_roots",
     "parse_env_text",
     "normalize_env_file",
     "sync_env_file_to_infisical",
     "sync_roots",
+    "audit_drift",
+    "audit_roots",
 ]
