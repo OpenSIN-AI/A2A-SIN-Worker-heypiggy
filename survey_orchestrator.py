@@ -2,8 +2,8 @@
 # ================================================================================
 # DATEI: survey_orchestrator.py
 # PROJEKT: A2A-SIN-Worker-heyPiggy (OpenSIN AI Agent System)
-# ZWECK: 
-# WICHTIG FÜR ENTWICKLER: 
+# ZWECK:
+# WICHTIG FÜR ENTWICKLER:
 #   - Ändere nichts ohne zu verstehen was passiert
 #   - Jeder Kommentar erklärt WARUM etwas getan wird, nicht nur WAS
 #   - Bei Fragen erst Code lesen, dann ändern
@@ -63,11 +63,11 @@ from typing import Any, Awaitable, Callable
 class QueueState(Enum):
     # ========================================================================
     # KLASSE: QueueState(Enum)
-    # ZWECK: 
-    # WICHTIG: 
-    # METHODEN: 
+    # ZWECK:
+    # WICHTIG:
+    # METHODEN:
     # ========================================================================
-    
+
     """Alle möglichen Zustände der Survey-Queue."""
 
     IDLE = auto()
@@ -85,11 +85,11 @@ class QueueState(Enum):
 class SurveyRecord:
     # ========================================================================
     # KLASSE: SurveyRecord
-    # ZWECK: 
-    # WICHTIG: 
-    # METHODEN: 
+    # ZWECK:
+    # WICHTIG:
+    # METHODEN:
     # ========================================================================
-    
+
     """Eine einzelne Survey-Durchführung."""
 
     index: int
@@ -174,11 +174,11 @@ def _normalize_native_item(item: dict[str, Any]) -> dict[str, Any]:
 class SurveyOrchestrator:
     # ========================================================================
     # KLASSE: SurveyOrchestrator
-    # ZWECK: 
-    # WICHTIG: 
-    # METHODEN: 
+    # ZWECK:
+    # WICHTIG:
+    # METHODEN:
     # ========================================================================
-    
+
     """
     Koordiniert mehrere Surveys in einem einzigen Worker-Run.
 
@@ -355,6 +355,7 @@ class SurveyOrchestrator:
             return None
 
         await self._navigate_to(next_url)
+        await self._dismiss_obvious_modal()
         record = SurveyRecord(
             index=len(self._records) + 1,
             start_url=next_url,
@@ -652,7 +653,7 @@ class SurveyOrchestrator:
                 result = await self._bridge(
                     "dom.queryAll",
                     {
-                        "selector": "div.survey-item, [id^='survey-'], .survey-card, [data-survey-id]",
+                        "selector": "button, a, [role='button'], div, article, li, section",
                         **self._tab_params(),
                     },
                 )
@@ -685,7 +686,18 @@ class SurveyOrchestrator:
                         best_price = price
 
                 if best_item is None:
-                    best_item = items[0] if isinstance(items[0], dict) else None
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        text = str(item.get("text", "") or "").lower()
+                        if any(
+                            token in text
+                            for token in ("survey", "umfrage", "erhebung", "fragebogen")
+                        ):
+                            best_item = item
+                            break
+                    if best_item is None:
+                        best_item = items[0] if isinstance(items[0], dict) else None
                 return _normalize_native_item(best_item) if isinstance(best_item, dict) else None
             except Exception as e:
                 self._audit("queue_dashboard_scan_error_v2", error=str(e))
@@ -702,6 +714,65 @@ class SurveyOrchestrator:
         except Exception as e:
             self._audit("queue_dashboard_scan_error", error=str(e))
         return None
+
+    async def _dismiss_obvious_modal(self) -> bool:
+        """Schliesst offensichtliche Overlays vor dem Dashboard-Scan.
+
+        WHY: Auf HeyPiggy blockieren Consent-/Info-Dialoge oft die Survey-Kacheln.
+             Wenn ein klarer Schliessen-Button sichtbar ist, räumen wir ihn weg,
+             bevor wir nach neuen Umfragen suchen.
+        """
+        try:
+            if _bridge_v2_enabled():
+                result = await self._bridge(
+                    "dom.queryAll",
+                    {
+                        "selector": "button, [role='button'], [aria-label], [title]",
+                        **self._tab_params(),
+                    },
+                )
+                items = result.get("items", []) if isinstance(result, dict) else []
+                if not isinstance(items, list):
+                    return False
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    text = str(item.get("text", "") or "").strip().lower()
+                    aria = (
+                        str(item.get("ariaLabel", item.get("aria-label", "")) or "").strip().lower()
+                    )
+                    title = str(item.get("title", "") or "").strip().lower()
+                    selector = str(item.get("selector", "") or "").strip()
+                    ref = str(item.get("ref", "") or "").strip().lstrip("@")
+                    close_like = any(token in (text, aria, title) for token in ("x", "×")) or any(
+                        token in aria or token in title or token in text
+                        for token in (
+                            "close",
+                            "dismiss",
+                            "schliessen",
+                            "schließen",
+                            "schliessen",
+                            "schließen",
+                        )
+                    )
+                    if not close_like:
+                        continue
+                    if ref:
+                        await self._bridge("click_ref", {"ref": ref, **self._tab_params()})
+                        await asyncio.sleep(1.0)
+                        self._audit("queue_modal_dismissed", via="ref")
+                        return True
+                    if selector:
+                        await self._bridge(
+                            "ghost_click", {"selector": selector, **self._tab_params()}
+                        )
+                        await asyncio.sleep(1.0)
+                        self._audit("queue_modal_dismissed", via="selector")
+                        return True
+        except Exception as e:
+            self._audit("queue_modal_dismiss_error", error=str(e))
+        return False
 
     async def _current_url(self) -> str:
         try:

@@ -1,8 +1,8 @@
 # ================================================================================
 # DATEI: test_survey_orchestrator.py
 # PROJEKT: A2A-SIN-Worker-heyPiggy (OpenSIN AI Agent System)
-# ZWECK: 
-# WICHTIG FÜR ENTWICKLER: 
+# ZWECK:
+# WICHTIG FÜR ENTWICKLER:
 #   - Ändere nichts ohne zu verstehen was passiert
 #   - Jeder Kommentar erklärt WARUM etwas getan wird, nicht nur WAS
 #   - Bei Fragen erst Code lesen, dann ändern
@@ -36,12 +36,12 @@ def bridge():
     # -------------------------------------------------------------------------
     # FUNKTION: bridge
     # PARAMETER: keine
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     return AsyncMock()
 
 
@@ -50,12 +50,12 @@ def tmp_history():
     # -------------------------------------------------------------------------
     # FUNKTION: tmp_history
     # PARAMETER: keine
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     with tempfile.TemporaryDirectory() as d:
         yield Path(d) / "history.json"
 
@@ -65,12 +65,12 @@ def orch(bridge, tmp_history):
     # -------------------------------------------------------------------------
     # FUNKTION: orch
     # PARAMETER: bridge, tmp_history
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     return SurveyOrchestrator(
         execute_bridge=bridge,
         tab_params_factory=lambda: {"tab_id": "t1"},
@@ -89,12 +89,12 @@ async def test_begin_with_explicit_url_starts_running(orch, bridge):
     # -------------------------------------------------------------------------
     # FUNKTION: test_begin_with_explicit_url_starts_running
     # PARAMETER: orch, bridge
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     bridge.return_value = {"ok": True}
     record = await orch.begin()
     assert record is not None
@@ -108,12 +108,12 @@ async def test_begin_with_no_urls_and_no_autodetect_sets_exhausted(bridge, tmp_h
     # -------------------------------------------------------------------------
     # FUNKTION: test_begin_with_no_urls_and_no_autodetect_sets_exhausted
     # PARAMETER: bridge, tmp_history
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     orch = SurveyOrchestrator(
         execute_bridge=bridge,
         tab_params_factory=lambda: {},
@@ -134,12 +134,12 @@ async def test_explicit_urls_consumed_in_order(bridge, tmp_history):
     # -------------------------------------------------------------------------
     # FUNKTION: test_explicit_urls_consumed_in_order
     # PARAMETER: bridge, tmp_history
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     urls = [
         "https://www.heypiggy.com/survey/1",
         "https://www.heypiggy.com/survey/2",
@@ -171,12 +171,12 @@ async def test_max_surveys_limit_triggers_limit_reached(orch, bridge):
     # -------------------------------------------------------------------------
     # FUNKTION: test_max_surveys_limit_triggers_limit_reached
     # PARAMETER: orch, bridge
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     """Mit max_surveys=5 und 5 abgeschlossenen Surveys muss LIMIT_REACHED kommen."""
     bridge.return_value = {"ok": True}
     await orch.begin()
@@ -197,12 +197,12 @@ async def test_failed_survey_recorded(orch, bridge):
     # -------------------------------------------------------------------------
     # FUNKTION: test_failed_survey_recorded
     # PARAMETER: orch, bridge
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     bridge.return_value = {"ok": True}
     await orch.begin()
     await orch.on_survey_completed(success=False, steps_used=60, end_reason="max_steps")
@@ -216,12 +216,12 @@ async def test_record_has_start_and_end_time(orch, bridge):
     # -------------------------------------------------------------------------
     # FUNKTION: test_record_has_start_and_end_time
     # PARAMETER: orch, bridge
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     bridge.return_value = {"ok": True}
     await orch.begin()
     await orch.on_survey_completed(success=True, steps_used=12, end_reason="survey_done")
@@ -236,12 +236,12 @@ def test_finalize_returns_stats(orch):
     # -------------------------------------------------------------------------
     # FUNKTION: test_finalize_returns_stats
     # PARAMETER: orch
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     stats = orch.finalize()
     assert "attempted" in stats
     assert "completed" in stats
@@ -254,12 +254,12 @@ def test_stats_summary_empty_on_fresh_orchestrator(orch):
     # -------------------------------------------------------------------------
     # FUNKTION: test_stats_summary_empty_on_fresh_orchestrator
     # PARAMETER: orch
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     stats = orch.stats_summary()
     assert stats["attempted"] == 0
     assert stats["completed"] == 0
@@ -271,12 +271,12 @@ async def test_abort_sets_state(orch, bridge):
     # -------------------------------------------------------------------------
     # FUNKTION: test_abort_sets_state
     # PARAMETER: orch, bridge
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     bridge.return_value = {"ok": True}
     await orch.begin()
     orch.abort("test reason")
@@ -288,12 +288,12 @@ async def test_history_file_written_on_finalize(orch, bridge, tmp_history):
     # -------------------------------------------------------------------------
     # FUNKTION: test_history_file_written_on_finalize
     # PARAMETER: orch, bridge, tmp_history
-    # ZWECK: 
-    # WAS PASSIERT HIER: 
-    # WARUM DIESER WEG: 
-    # ACHTUNG: 
+    # ZWECK:
+    # WAS PASSIERT HIER:
+    # WARUM DIESER WEG:
+    # ACHTUNG:
     # -------------------------------------------------------------------------
-    
+
     bridge.return_value = {"ok": True}
     await orch.begin()
     await orch.on_survey_completed(success=True, steps_used=5, end_reason="survey_done")
@@ -361,3 +361,63 @@ async def test_v2_dashboard_survey_normalizes_selector_ref_style(monkeypatch, br
     assert best is not None
     assert best["selector"] == ""
     assert best["ref"] == "e11"
+
+
+@pytest.mark.asyncio
+async def test_v2_dashboard_survey_matches_generic_visible_card(monkeypatch, bridge, tmp_history):
+    monkeypatch.setenv("OPENSIN_V2", "1")
+    bridge.return_value = {
+        "items": [
+            {
+                "selector": "div.card",
+                "text": "0,44 € · 4 Minuten · 4.5 Sterne",
+                "ref": "e19",
+            }
+        ]
+    }
+    orch = SurveyOrchestrator(
+        execute_bridge=bridge,
+        tab_params_factory=lambda: {},
+        dashboard_url="https://www.heypiggy.com/",
+        explicit_urls=[],
+        autodetect=True,
+        max_surveys=5,
+        cooldown_sec=0.0,
+        cooldown_jitter=0.0,
+        history_path=tmp_history,
+    )
+
+    best = await orch._find_best_dashboard_survey()
+
+    assert best is not None
+    assert best["ref"] == "e19"
+
+
+@pytest.mark.asyncio
+async def test_v2_begin_dismisses_obvious_modal_before_scanning(monkeypatch, bridge, tmp_history):
+    monkeypatch.setenv("OPENSIN_V2", "1")
+    bridge.side_effect = [
+        {"items": []},
+        {"ok": True},
+        {"items": [{"selector": "button.close", "text": "×", "ref": "e1"}]},
+        {"items": [{"selector": "div.card", "text": "0,23 € · 1 Minute", "ref": "e2"}]},
+        {"url": "https://www.heypiggy.com/survey/42"},
+    ]
+    orch = SurveyOrchestrator(
+        execute_bridge=bridge,
+        tab_params_factory=lambda: {},
+        dashboard_url="https://www.heypiggy.com/",
+        explicit_urls=[],
+        autodetect=True,
+        max_surveys=5,
+        cooldown_sec=0.0,
+        cooldown_jitter=0.0,
+        history_path=tmp_history,
+    )
+
+    record = await orch.begin()
+
+    assert record is not None
+    assert orch.state == QueueState.RUNNING
+    methods = [call.args[0] for call in bridge.await_args_list]
+    assert "click_ref" in methods
