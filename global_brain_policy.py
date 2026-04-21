@@ -73,6 +73,33 @@ class SecretDetection:
     branch: str = "main"
     agent_id: str = ""
     legacy_flag: bool = True
+    # Rotation metadata - tracks secret lifecycle
+    owner: str = ""  # Who is responsible for this secret (email, team, agent)
+    ttl_days: int | None = None  # Time-to-live in days (None = never expires)
+    last_verified: datetime | None = None  # Last time secret was verified/rotated
+    rotation_policy: str = "manual"  # "manual", "auto_rotate", "external"
+
+
+@dataclass(slots=True)
+class SecretRotationMetadata:
+    """Extended metadata for secret rotation tracking.
+
+    WHY: Secrets need lifecycle management beyond just existence.
+    This tracks:
+    - owner: responsible party for rotation
+    - ttl_days: when to rotate (None = never)
+    - last_verified: last confirmation the secret still works
+    - rotation_policy: how rotation happens (manual vs automated)
+    """
+
+    secret_key: str
+    owner: str
+    ttl_days: int | None = None
+    last_verified: datetime | None = None
+    last_rotated: datetime | None = None
+    rotation_policy: str = "manual"  # manual | auto_rotate | external
+    rotation_url: str = ""  # Link to rotation docs/external system
+    notes: str = ""
 
 
 def normalize_env_key(key: str) -> str:
