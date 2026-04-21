@@ -412,6 +412,23 @@ class PlaywrightDriver(BrowserDriver):
         self._mouse_move_ms = self._config.get("mouse_move_ms", (100, 300))
         self._click_hold_ms = self._config.get("click_hold_ms", 100)
 
+    def _prepare_profile_root(self) -> None:
+        """Remove stale Chromium singleton files before launch.
+
+        WHY: A crashed previous Playwright session can leave a stale
+        SingletonSocket/Lock behind, which makes the next persistent launch abort
+        even though no browser process is actually alive.
+        """
+
+        self._profile_root.mkdir(parents=True, exist_ok=True)
+        for name in ("SingletonLock", "SingletonCookie", "SingletonSocket", "DevToolsActivePort"):
+            path = self._profile_root / name
+            if path.exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
     @property
     def driver_type(self) -> DriverType:
         return DriverType.PLAYWRIGHT
@@ -455,9 +472,10 @@ class PlaywrightDriver(BrowserDriver):
             ]
             context_options["user_agent"] = random.choice(user_agents)
 
-        self._profile_root.mkdir(parents=True, exist_ok=True)
+        self._prepare_profile_root()
         self._context = await self._playwright.chromium.launch_persistent_context(
             user_data_dir=str(self._profile_root),
+            channel="chrome",
             headless=self._config.get("headless", False),
             args=[
                 "--disable-blink-features=AutomationControlled",
