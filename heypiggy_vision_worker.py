@@ -66,6 +66,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable
 
 from circuit_breaker import CircuitBreaker
 from config import load_config_from_env
@@ -113,6 +114,7 @@ from session_store import (
     restore_session as _session_restore,
 )
 from platform_profile import active as _active_platform
+from bridge_retry import classify_result as _bridge_classify_result
 from bridge_retry import call_with_retry as _bridge_call_with_retry
 from budget_guard import BudgetGuard
 
@@ -231,6 +233,7 @@ MAX_NO_PROGRESS = WORKER_CONFIG.vision.max_no_progress
 MAX_CLICK_ESCALATIONS = WORKER_CONFIG.vision.max_click_escalations
 VISION_MODEL = WORKER_CONFIG.vision.model
 CLICK_ACTIONS = WORKER_CONFIG.click_actions
+OPENSIN_V2_ENABLED = WORKER_CONFIG.opensin_v2
 NVIDIA_API_KEY = WORKER_CONFIG.nvidia.api_key
 NVIDIA_VISION_MODEL = WORKER_CONFIG.nvidia.primary_model
 NVIDIA_FALLBACK_MODELS = WORKER_CONFIG.nvidia.fallback_models
@@ -256,6 +259,94 @@ WORKER_CONFIG.artifacts.ensure_dirs()
 CURRENT_RUN_SUMMARY: RunSummary | None = None
 VISION_CIRCUIT_BREAKER = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
 _VISION_CACHE: dict[tuple[str, str], dict[str, object]] = {}
+BRIDGE_CONTRACT_INFO: dict[str, object] | None = None
+BRIDGE_CONTRACT_METHODS: dict[str, dict[str, object]] = {}
+BRIDGE_CONTRACT_IDEMPOTENT_METHODS: set[str] = set()
+BRIDGE_CONTRACT_ERROR_CODES: set[str] = set()
+BRIDGE_CAPABILITY_TOOL_NAMES: set[str] | None = None
+BRIDGE_TOOL_SURFACE_KIND: str | None = None
+BRIDGE_V2_REQUIRED_METHODS: frozenset[str] = frozenset(
+    {
+        "bridge.contract",
+        "tabs.create",
+        "tabs.list",
+        "tabs.close",
+        "tabs.activate",
+        "tabs.reload",
+        "nav.goto",
+        "nav.back",
+        "nav.forward",
+        "nav.reload",
+        "nav.waitForSelector",
+        "dom.snapshot",
+        "dom.resolve",
+        "dom.waitForSelector",
+        "dom.fullSnapshot",
+        "dom.click",
+        "dom.type",
+        "dom.fill",
+        "dom.select",
+        "dom.getText",
+        "dom.getAttribute",
+        "dom.evaluate",
+        "dom.screenshot",
+        "bridge.evidenceBundle",
+        "bridge.traces",
+        "cookies.getAll",
+        "cookies.set",
+        "cookies.remove",
+        "cookies.clearForDomain",
+        "storage.local.get",
+        "storage.local.set",
+        "storage.local.clear",
+        "net.events",
+        "net.observe",
+        "net.stop",
+        "net.block",
+        "session.capture",
+        "session.restore",
+        "session.manifest",
+        "session.invalidate",
+        "session.lastKnownGood",
+        "session.health",
+        "behavior.start",
+        "behavior.stop",
+        "behavior.status",
+        "behavior.list",
+        "behavior.get",
+        "stealth.status",
+        "stealth.assess",
+        "stealth.detectChallenge",
+    }
+)
+BRIDGE_V2_REQUIRED_ERROR_CODES: frozenset[str] = frozenset(
+    {
+        "transport_error",
+        "rpc_invalid",
+        "unknown_method",
+        "timeout",
+        "target_gone",
+        "navigation_aborted",
+        "navigation_timeout",
+        "cdp_failed",
+        "frame_detached",
+        "element_not_found",
+        "element_not_actionable",
+        "postcondition_failed",
+        "duplicate_action",
+        "session_invalid",
+        "session_stale",
+        "session_locked",
+        "origin_not_permitted",
+        "anti_bot_challenge",
+        "captcha_required",
+        "rate_limit_remote",
+        "unsupported",
+    }
+)
+BRIDGE_TRACE_ID = f"heypiggy-{RUN_ID}"
+BRIDGE_EVIDENCE_PATH: Path | None = None
+BRIDGE_TRACES_PATH: Path | None = None
 
 # Multi-Modal Media Router + Multi-Survey Orchestrator werden in main() initialisiert.
 # WHY: Globals statt Dependency-Injection, weil dom_prescan() und die Haupt-Loop
@@ -688,9 +779,16 @@ def apply_fail_learning_to_decision(
     next_action = str(decision.get("next_action", "none"))
     raw_params = decision.get("next_params", {})
     next_params = raw_params if isinstance(raw_params, dict) else {}
+    selector, ref = _normalize_selector_and_ref(
+        next_params.get("selector", ""), next_params.get("ref", "")
+    )
+    normalized_params = dict(next_params)
+    normalized_params["selector"] = selector
+    normalized_params["ref"] = ref
+    signature_params = _compact_action_params(normalized_params)
     denylist = _get_fail_denylist()
-    selector = str(next_params.get("selector", ""))
-    action_signature = _build_action_signature(next_action, next_params)
+    failure_target = ref or selector
+    action_signature = _build_action_signature(next_action, signature_params)
     reason_text = str(decision.get("reason", "")).lower()
 
     memory = load_fail_learning()
@@ -702,18 +800,18 @@ def apply_fail_learning_to_decision(
         loop_issues = int(issue_counts.get("loop_detected", 0))
 
     adapted = dict(decision)
-    adapted["next_params"] = dict(next_params)
+    adapted["next_params"] = dict(normalized_params)
 
-    if selector and selector in denylist["selectors"]:
+    if failure_target and failure_target in denylist["selectors"]:
         adapted["verdict"] = "RETRY"
         adapted["next_action"] = "none"
         adapted["next_params"] = {}
-        adapted["reason"] = f"Fail-learning denylist blockiert Selector: {selector}"
+        adapted["reason"] = f"Fail-learning denylist blockiert Selector: {failure_target}"
         adapted["progress"] = False
         audit(
             "warning",
             message="Fail-learning selector denylist aktiv",
-            selector=selector,
+            selector=failure_target,
         )
         return adapted
 
@@ -728,7 +826,7 @@ def apply_fail_learning_to_decision(
 
     if (
         next_action == "click_element"
-        and not str(next_params.get("selector", "")).startswith("#")
+        and not selector.startswith("#")
         and any(keyword in reason_text for keyword in denylist["root_cause_keywords"])
         and any(keyword in FAIL_RUNTIME_KEYWORDS for keyword in denylist["root_cause_keywords"])
     ):
@@ -746,7 +844,7 @@ def apply_fail_learning_to_decision(
         )
         return adapted
 
-    if loop_issues > 0 and gate.record_action(screenshot_hash, next_action, next_params):
+    if loop_issues > 0 and gate.record_action(screenshot_hash, next_action, signature_params):
         adapted["verdict"] = "RETRY"
         adapted["next_action"] = "none"
         adapted["next_params"] = {}
@@ -758,8 +856,6 @@ def apply_fail_learning_to_decision(
     if selector_issues <= 0 or next_action != "click_element":
         return adapted
 
-    selector = str(next_params.get("selector", ""))
-    ref = str(next_params.get("ref", ""))
     description = str(next_params.get("description", ""))
 
     if ref:
@@ -794,6 +890,10 @@ def apply_fail_learning_to_decision(
 # ============================================================================
 # CURRENT_TAB_ID und CURRENT_WINDOW_ID werden beim ersten tabs_create gesetzt
 # und DANACH niemals mehr auf None zurückgesetzt.
+# NOTE: Bridge-Antworten sind nicht überall gleich: manche Builds geben
+#       {tabId, windowId}, andere {tab: {id, windowId, ...}} zurück. Wir
+#       normalisieren beides hier, damit der Worker nicht an Bridge-Form-
+#       unterschieden scheitert.
 # Alle Bridge-Calls MÜSSEN tabId enthalten — kein Fallback auf aktiven Tab!
 # WHY: Parallele User-Tabs dürfen den Worker NIEMALS beeinflussen.
 # CONSEQUENCES: Wenn tabId nicht gesetzt ist, schlägt der Call laut fehl.
@@ -827,6 +927,467 @@ def _tab_params() -> dict:
     CONSEQUENCES: Wirft RuntimeError wenn tabId nicht gesetzt — kein stiller Fallback.
     """
     return {"tabId": _require_tab_id()}
+
+
+async def _active_tab_url() -> str:
+    """Return the URL of the current worker tab without using JS eval."""
+    query: dict[str, object] = {}
+    if CURRENT_WINDOW_ID is not None:
+        query["windowId"] = CURRENT_WINDOW_ID
+
+    tab_args = {"query": query} if query else {}
+    tabs_result = await execute_bridge("tabs_list", tab_args)
+    tabs = []
+    if isinstance(tabs_result, dict):
+        tabs = tabs_result.get("tabs", []) or []
+
+    if CURRENT_TAB_ID is not None:
+        for tab in tabs:
+            if isinstance(tab, dict) and tab.get("id") == CURRENT_TAB_ID:
+                return str(tab.get("url", "") or "")
+
+    for tab in tabs:
+        if isinstance(tab, dict) and tab.get("active"):
+            return str(tab.get("url", "") or "")
+
+    return ""
+
+
+def _page_info_fields(page_info: object) -> tuple[str, str, str]:
+    """Extract url/title/status from either tabs.get or legacy page-info payloads."""
+    if not isinstance(page_info, dict):
+        return "", "", ""
+
+    payload = page_info.get("tab") if isinstance(page_info.get("tab"), dict) else page_info
+    if not isinstance(payload, dict):
+        return "", "", ""
+
+    url = str(payload.get("url", "") or "")
+    title = str(payload.get("title", "") or "")
+    status = str(payload.get("status", "") or payload.get("readyState", "") or "")
+    return url, title, status
+
+
+def _extract_tab_binding(tab_res: object) -> tuple[int | None, int | None]:
+    """
+    Extrahiert tabId/windowId aus Bridge-Antworten in beiden bekannten Formen.
+
+    WHY: OpenSIN-Bridge liefert `tabs_create` je nach Transport/Version als
+         entweder `{tabId, windowId}` oder `{tab: {...}}`. Der Worker muss
+         beide Formen akzeptieren, sonst bricht der komplette Run beim ersten
+         neuen Tab ab.
+    CONSEQUENCES: Lieber normalisieren als hard-failen wegen eines reinen
+         Antwort-Shapes ohne semantischen Unterschied.
+    """
+    if not isinstance(tab_res, dict):
+        return None, None
+
+    tab_id = tab_res.get("tabId")
+    window_id = tab_res.get("windowId")
+    if isinstance(tab_id, int):
+        return tab_id, window_id if isinstance(window_id, int) else None
+
+    nested = tab_res.get("tab")
+    if isinstance(nested, dict):
+        nested_id = nested.get("id")
+        nested_window_id = nested.get("windowId")
+        if isinstance(nested_id, int):
+            return nested_id, nested_window_id if isinstance(nested_window_id, int) else None
+
+    return None, None
+
+
+def _bridge_v2_enabled() -> bool:
+    return bool(OPENSIN_V2_ENABLED)
+
+
+async def _bridge_tool_names() -> set[str]:
+    """Fetch and cache the active bridge tool inventory."""
+    global BRIDGE_CAPABILITY_TOOL_NAMES, BRIDGE_TOOL_SURFACE_KIND
+    if BRIDGE_CAPABILITY_TOOL_NAMES is not None:
+        return BRIDGE_CAPABILITY_TOOL_NAMES
+    caps_raw = await asyncio.to_thread(
+        post_mcp, "tools/call", {"name": "system.capabilities", "arguments": {}}
+    )
+    caps = decode_mcp_result(caps_raw)
+    tool_names = {
+        str(tool.get("name"))
+        for tool in (caps.get("tools", []) if isinstance(caps, dict) else [])
+        if isinstance(tool, dict) and tool.get("name")
+    }
+    BRIDGE_CAPABILITY_TOOL_NAMES = tool_names
+    BRIDGE_TOOL_SURFACE_KIND = "v2" if any("." in name for name in tool_names) else "legacy"
+    return tool_names
+
+
+def _translate_v2_bridge_method(
+    method: str, params: dict[str, object] | None = None
+) -> tuple[str, dict[str, object]]:
+    """Map legacy worker/tool names to the canonical v1 bridge surface."""
+    call_params: dict[str, object] = dict(params or {})
+    if not _bridge_v2_enabled():
+        return method, call_params
+    if BRIDGE_TOOL_SURFACE_KIND == "legacy":
+        return method, call_params
+
+    translations: dict[str, tuple[str, Callable[[dict[str, object]], dict[str, object]]]] = {
+        "execute_javascript": (
+            "dom.evaluate",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "expression": str(p.get("script") or p.get("expression") or ""),
+                "args": p.get("args"),
+                "awaitPromise": bool(p.get("awaitPromise", True)),
+                "returnByValue": bool(p.get("returnByValue", True)),
+            },
+        ),
+        "tabs_create": (
+            "tabs.create",
+            lambda p: {"url": str(p.get("url", "")), "active": bool(p.get("active", True))},
+        ),
+        "tabs_list": ("tabs.list", lambda p: {}),
+        "tabs_close": (
+            "tabs.close",
+            lambda p: {
+                "tabIds": p.get("tabIds")
+                or ([p["tabId"]] if isinstance(p.get("tabId"), int) else [])
+            },
+        ),
+        "tabs_activate": (
+            "tabs.activate",
+            lambda p: {"tabId": int(p.get("tabId") or _require_tab_id())},
+        ),
+        "tabs_reload": ("tabs.reload", lambda p: {"tabId": p.get("tabId")}),
+        "navigate": (
+            "nav.goto",
+            lambda p: {
+                "url": str(p.get("url", "")),
+                "tabId": p.get("tabId"),
+                "waitUntil": p.get("waitUntil"),
+                "timeoutMs": p.get("timeoutMs"),
+            },
+        ),
+        "go_back": ("nav.back", lambda p: {"tabId": p.get("tabId")}),
+        "go_forward": ("nav.forward", lambda p: {"tabId": p.get("tabId")}),
+        "reload": ("nav.reload", lambda p: {"tabId": p.get("tabId")}),
+        "wait_for_element": (
+            "nav.waitForSelector",
+            lambda p: {
+                "selector": str(p.get("selector", "")),
+                "state": p.get("state", "visible"),
+                "timeoutMs": p.get("timeoutMs") or p.get("timeout") or 10_000,
+                "tabId": p.get("tabId"),
+            },
+        ),
+        "snapshot": (
+            "dom.snapshot",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "mode": str(p.get("mode", "semantic")),
+                "maxNodes": p.get("maxNodes", 2000),
+                "includeHidden": p.get("includeHidden", False),
+            },
+        ),
+        "observe": (
+            "dom.screenshot",
+            lambda p: {
+                "format": p.get("format", "png"),
+                "quality": p.get("quality", 90),
+                "fullPage": bool(p.get("fullPage", False)),
+                "tabId": p.get("tabId"),
+            },
+        ),
+        "click_ref": (
+            "dom.click",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "ref": _bridge_ref_value(p.get("ref")),
+                "human": bool(p.get("human", True)),
+                "button": p.get("button", "left"),
+                "clickCount": p.get("clickCount", 1),
+            },
+        ),
+        "click_element": (
+            "dom.click",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "selector": p.get("selector"),
+                "ref": _bridge_ref_value(p.get("ref")),
+                "human": bool(p.get("human", True)),
+                "button": p.get("button", "left"),
+                "clickCount": p.get("clickCount", 1),
+            },
+        ),
+        "click": (
+            "dom.click",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "selector": p.get("selector"),
+                "ref": _bridge_ref_value(p.get("ref")),
+                "human": bool(p.get("human", True)),
+            },
+        ),
+        "ghost_click": (
+            "dom.click",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "selector": p.get("selector"),
+                "ref": _bridge_ref_value(p.get("ref")),
+                "human": bool(p.get("human", True)),
+                "button": p.get("button", "left"),
+                "clickCount": p.get("clickCount", 1),
+            },
+        ),
+        "type_text": (
+            "dom.type",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "selector": p.get("selector"),
+                "ref": _bridge_ref_value(p.get("ref")),
+                "text": p.get("text", ""),
+                "delayMs": p.get("delayMs"),
+                "replace": bool(p.get("replace", False)),
+                "pressEnter": bool(p.get("pressEnter", False)),
+                "human": bool(p.get("human", True)),
+            },
+        ),
+        "select_option": (
+            "dom.select",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "selector": p.get("selector"),
+                "ref": _bridge_ref_value(p.get("ref")),
+                "value": p.get("value"),
+                "label": p.get("label") or p.get("text"),
+                "index": p.get("index"),
+                "multiple": p.get("multiple"),
+            },
+        ),
+        "get_page_info": ("tabs.get", lambda p: {"tabId": p.get("tabId") or _require_tab_id()}),
+        "get_text": (
+            "dom.getText",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "selector": p.get("selector"),
+                "ref": _bridge_ref_value(p.get("ref")),
+            },
+        ),
+        "get_attribute": (
+            "dom.getAttribute",
+            lambda p: {
+                "tabId": p.get("tabId"),
+                "selector": p.get("selector"),
+                "ref": _bridge_ref_value(p.get("ref")),
+                "name": p.get("name") or p.get("attribute"),
+            },
+        ),
+        "export_all_cookies": ("cookies.getAll", lambda p: {"domain": p.get("domain")}),
+        "set_cookie": (
+            "cookies.set",
+            lambda p: dict(p.get("cookie")) if isinstance(p.get("cookie"), dict) else dict(p),
+        ),
+        "clear_cookies": (
+            "cookies.clearForDomain",
+            lambda p: {"domain": str(p.get("domain", ""))},
+        ),
+        "health": ("system.health", lambda p: {}),
+        "list_tools": ("system.capabilities", lambda p: {}),
+        "get_extension_info": ("system.version", lambda p: {}),
+    }
+
+    translation = translations.get(method)
+    if translation is None:
+        return method, call_params
+
+    canonical, transform = translation
+    translated = transform(call_params)
+    if canonical != method:
+        audit("bridge_v2_translate", legacy_method=method, canonical_method=canonical)
+    return canonical, translated
+
+
+def _bridge_contract_is_retryable(method: str) -> bool:
+    if _bridge_v2_enabled() and BRIDGE_CONTRACT_IDEMPOTENT_METHODS:
+        return method in BRIDGE_CONTRACT_IDEMPOTENT_METHODS
+
+    idempotent_methods = {
+        "screenshot",
+        "execute_javascript",
+        "get_snapshot",
+        "snapshot",
+        "get_clickable_snapshot",
+        "export_all_cookies",
+        "list_tabs",
+        "get_active_tab",
+        "get_url",
+        "get_page_state",
+    }
+    return method in idempotent_methods
+
+
+def _format_snapshot_prompt_block(snapshot: object) -> tuple[str, int]:
+    """Render canonical dom.snapshot output into prompt text + interactive count."""
+    if not isinstance(snapshot, dict):
+        return "", 0
+
+    nodes = snapshot.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        tree = snapshot.get("tree")
+        if isinstance(tree, str) and tree.strip():
+            interactive = [line.strip() for line in tree.splitlines() if "@e" in line]
+            if interactive:
+                return (
+                    "ACCESSIBILITY-TREE REFS (nutzbar mit click_ref):\n"
+                    + "\n".join(interactive[:20]),
+                    len(interactive),
+                )
+        return "", 0
+
+    lines: list[str] = []
+    interactive_count = 0
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        role = str(node.get("role") or "")
+        name = str(node.get("name") or "").strip()
+        ref = str(node.get("ref") or "").strip()
+        selector = str(node.get("selector") or "").strip()
+        tag = str(node.get("tag") or "").strip()
+        if not (ref or selector or name):
+            continue
+        if role or ref or selector:
+            interactive_count += 1
+        lines.append(
+            f'- ref={ref or "?"} role={role or "?"} tag={tag or "?"} selector="{selector[:80]}" text="{name[:60]}"'
+        )
+        if len(lines) >= 20:
+            break
+
+    if not lines:
+        return "", 0
+
+    return "DOM SNAPSHOT REFS (canonical dom.snapshot / dom.resolve):\n" + "\n".join(
+        lines
+    ), interactive_count
+
+
+async def _pin_bridge_contract_if_needed() -> dict[str, object] | None:
+    """Fetch and validate bridge.contract once when OPENSIN_V2 is enabled."""
+    global \
+        BRIDGE_CONTRACT_INFO, \
+        BRIDGE_CONTRACT_METHODS, \
+        BRIDGE_CONTRACT_IDEMPOTENT_METHODS, \
+        BRIDGE_CONTRACT_ERROR_CODES
+
+    if not _bridge_v2_enabled():
+        return None
+    if BRIDGE_CONTRACT_INFO is not None:
+        return BRIDGE_CONTRACT_INFO
+
+    # Harte Vorab-Pruefung: Wenn die aktive Bridge den Toolnamen schon nicht
+    # in `system.capabilities` fuehrt, sparen wir uns die drei sinnlosen 500er.
+    try:
+        tool_names = await _bridge_tool_names()
+        if "bridge.contract" not in tool_names:
+            BRIDGE_CONTRACT_INFO = {
+                "version": "bridge.contract-unavailable",
+                "revision": 0,
+                "methods": [],
+                "error": "bridge.contract not listed in system.capabilities",
+            }
+            BRIDGE_CONTRACT_METHODS = {}
+            BRIDGE_CONTRACT_IDEMPOTENT_METHODS = set()
+            BRIDGE_CONTRACT_ERROR_CODES = set()
+            audit(
+                "bridge_contract_missing",
+                error="bridge.contract not listed in system.capabilities",
+                message="bridge.contract fehlt; v2-compatibility mode wird verwendet",
+            )
+            return BRIDGE_CONTRACT_INFO
+    except Exception:
+        # Wenn capability discovery selbst kaputt ist, versuchen wir den
+        # eigentlichen Contract-Call und lassen das Fail-Closed-Verhalten greifen.
+        pass
+
+    try:
+        raw = await asyncio.to_thread(
+            post_mcp, "tools/call", {"name": "bridge.contract", "arguments": {}}
+        )
+        contract = decode_mcp_result(raw)
+    except Exception as exc:
+        error_text = str(exc)
+        if "Tool not found: bridge.contract" in error_text:
+            BRIDGE_CONTRACT_INFO = {
+                "version": "bridge.contract-unavailable",
+                "revision": 0,
+                "methods": [],
+                "error": error_text,
+            }
+            BRIDGE_CONTRACT_METHODS = {}
+            BRIDGE_CONTRACT_IDEMPOTENT_METHODS = set()
+            BRIDGE_CONTRACT_ERROR_CODES = set()
+            audit(
+                "bridge_contract_missing",
+                error=error_text[:160],
+                message="bridge.contract fehlt; v2-compatibility mode wird verwendet",
+            )
+            return BRIDGE_CONTRACT_INFO
+        raise
+
+    if not isinstance(contract, dict):
+        raise RuntimeError(
+            f"bridge.contract returned unexpected payload: {type(contract).__name__}"
+        )
+
+    version = str(contract.get("version") or "")
+    if version != "opensin.bridge.contract/v1":
+        raise RuntimeError(f"unsupported bridge contract version: {version or '(missing)'}")
+
+    revision = contract.get("revision")
+    if not isinstance(revision, int) or revision < 1:
+        raise RuntimeError(f"unsupported bridge contract revision: {revision!r}")
+
+    methods = contract.get("methods") or []
+    if not isinstance(methods, list):
+        raise RuntimeError("bridge.contract.methods must be a list")
+
+    method_map: dict[str, dict[str, object]] = {}
+    idempotent_methods: set[str] = set()
+    for entry in methods:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if isinstance(name, str) and name:
+            method_map[name] = entry
+            if bool(entry.get("idempotent")):
+                idempotent_methods.add(name)
+
+    missing_methods = sorted(name for name in BRIDGE_V2_REQUIRED_METHODS if name not in method_map)
+    if missing_methods:
+        raise RuntimeError(
+            "bridge contract missing required methods: " + ", ".join(missing_methods)
+        )
+
+    contract_error_codes = {str(code) for code in (contract.get("errorCodes") or []) if code}
+    missing_codes = sorted(
+        code for code in BRIDGE_V2_REQUIRED_ERROR_CODES if code not in contract_error_codes
+    )
+    if missing_codes:
+        raise RuntimeError(
+            "bridge contract missing required error codes: " + ", ".join(missing_codes)
+        )
+
+    BRIDGE_CONTRACT_INFO = contract
+    BRIDGE_CONTRACT_METHODS = method_map
+    BRIDGE_CONTRACT_IDEMPOTENT_METHODS = idempotent_methods
+    BRIDGE_CONTRACT_ERROR_CODES = contract_error_codes
+    audit(
+        "bridge_contract_pinned",
+        version=version,
+        revision=revision,
+        methods=len(method_map),
+    )
+    return contract
 
 
 # ============================================================================
@@ -928,6 +1489,78 @@ def collect_opencode_text(stdout: bytes, stderr: bytes = b"") -> str:
         if event.get("type") == "text":
             full_text += event.get("part", {}).get("text", "")
     return full_text.strip()
+
+
+_VISION_JSON_REQUIRED_KEYS = ("verdict", "page_state", "next_action", "progress")
+_VISION_JSON_OPTIONAL_KEYS = (
+    "reason",
+    "next_params",
+    "question_text",
+    "answer_text",
+    "question_topic",
+    "trap_detected",
+)
+
+
+def _vision_json_score(candidate: dict[str, object]) -> int:
+    """Bewertet, wie stark ein Dict nach einer Vision-Entscheidung aussieht."""
+    required = sum(1 for key in _VISION_JSON_REQUIRED_KEYS if key in candidate)
+    optional = sum(1 for key in _VISION_JSON_OPTIONAL_KEYS if key in candidate)
+    return required * 10 + optional
+
+
+def _extract_vision_json(text: str) -> dict[str, object] | None:
+    """Extrahiert das beste Vision-JSON-Objekt aus freiem Modell-Text.
+
+    WHY: Das Modell liefert manchmal Prosa, Code-Fences oder mehrere JSON-Fragmente.
+    Wir nehmen deshalb das am besten passende vollständige Entscheidungsobjekt statt
+    blind den ersten/letzten Klammerblock zu verwenden.
+    """
+    if not text:
+        return None
+
+    candidate = text.strip()
+    if not candidate:
+        return None
+
+    # Markdown-Fences entfernen, falls das Modell JSON eingerahmt hat.
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```(?:[a-zA-Z0-9_-]+)?\s*", "", candidate)
+        candidate = re.sub(r"\s*```$", "", candidate).strip()
+
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict) and _vision_json_score(parsed) > 0:
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    best_candidate: dict[str, object] | None = None
+    best_score = -1
+    best_end = -1
+
+    # Wir probieren jeden möglichen JSON-Start und wählen den bestbewerteten,
+    # vollständig lesbaren Dict-Block.
+    for match in re.finditer(r"[\{\[]", candidate):
+        try:
+            parsed, end = decoder.raw_decode(candidate[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+
+        score = _vision_json_score(parsed)
+        if score <= 0:
+            continue
+
+        absolute_end = match.start() + end
+        if score > best_score or (score == best_score and absolute_end > best_end):
+            best_candidate = parsed
+            best_score = score
+            best_end = absolute_end
+
+    return best_candidate
 
 
 def detect_vision_auth_failure(raw_text: str) -> str | None:
@@ -1392,6 +2025,14 @@ async def ensure_worker_preflight() -> dict:
         audit("stop", reason=reason)
         return {"ok": False, "reason": reason}
 
+    if _bridge_v2_enabled():
+        try:
+            await _pin_bridge_contract_if_needed()
+        except Exception as exc:
+            reason = f"bridge_contract_pin_failed: {exc}"
+            audit("stop", reason=reason)
+            return {"ok": False, "reason": reason}
+
     probe_path = ensure_vision_probe_screenshot()
     probe_prompt = (
         'Antworte ausschließlich mit gültigem JSON im Format {"status":"ok"}. Keine Erklärungen.'
@@ -1510,7 +2151,8 @@ def post_mcp(method: str, params: dict = None):
     """
     Sendet einen MCP-Request an die Bridge mit 3x Retry und Error-Body-Parsing.
     WHY: Die Bridge kann kurzzeitig 500er liefern, das darf nicht zum Crash führen.
-    CONSEQUENCES: Nach 3 Fehlversuchen wird eine RuntimeError geworfen (wird oben gefangen).
+    CONSEQUENCES: Permanente Schema-/Methodenfehler werden sofort gestoppt,
+    damit wir nicht denselben Fehler dreimal spammen.
     """
     global request_id_counter
     request_id_counter += 1
@@ -1533,6 +2175,8 @@ def post_mcp(method: str, params: dict = None):
                 if "error" in decoded:
                     last_err = f"MCP Protocol Error: {decoded['error']}"
                     audit("error", message=last_err, attempt=attempt + 1)
+                    if _bridge_classify_result({"error": decoded.get("error")}) == "permanent":
+                        raise RuntimeError(last_err)
                     time.sleep(2 * (attempt + 1))
                     continue
                 return decoded.get("result", {})
@@ -1546,11 +2190,15 @@ def post_mcp(method: str, params: dict = None):
             except Exception:
                 last_err = f"HTTP {e.code}: {e.reason}"
             audit("error", message=last_err, attempt=attempt + 1)
+            if _bridge_classify_result({"error": last_err}) == "permanent":
+                raise RuntimeError(last_err)
             time.sleep(2 * (attempt + 1))
 
         except Exception as e:
             last_err = str(e)
             audit("error", message=last_err, attempt=attempt + 1)
+            if _bridge_classify_result({"error": last_err}) == "permanent":
+                raise RuntimeError(last_err)
             time.sleep(2 * (attempt + 1))
 
     raise RuntimeError(f"MCP fehlgeschlagen nach 3 Versuchen: {last_err}")
@@ -1597,6 +2245,70 @@ def normalize_selector(selector: str) -> str:
     return cleaned
 
 
+def _is_generic_native_selector(selector: str) -> bool:
+    """Erkennt allgemeine Survey-Karte/Container-Selektoren ohne Eindeutigkeit."""
+    lowered = selector.strip().lower()
+    if not lowered:
+        return False
+    if "#" in lowered:
+        return False
+    generic_markers = (
+        "div.survey-item",
+        ".survey-item",
+        "div.survey-card",
+        ".survey-card",
+        "[data-survey-id]",
+        "[id^='survey-']",
+        '[id^="survey-"]',
+    )
+    return any(marker in lowered for marker in generic_markers)
+
+
+def _prefer_explicit_native_selector(item: dict[str, object]) -> str:
+    """Preferiert eindeutige #id-Selektoren aus nativen Bridge-Snapshots."""
+    selector = str(item.get("selector") or "").strip()
+    item_id = str(item.get("id") or "").strip()
+    if item_id and (not selector or _is_generic_native_selector(selector)):
+        return f"#{item_id}"
+    return selector
+
+
+def _bridge_ref_value(ref: object) -> str | None:
+    """Normalisiert Bridge-Refs auf die nackte Referenz ohne führendes @."""
+    value = str(ref or "").strip()
+    if not value:
+        return None
+    return value.lstrip("@") or None
+
+
+def _normalize_selector_and_ref(selector: object = "", ref: object = "") -> tuple[str, str]:
+    """Normalisiert selector/ref-Paare und zieht @-Refs in ref um."""
+    selector_text = str(selector or "").strip()
+    ref_text = str(ref or "").strip()
+    if not ref_text and selector_text.startswith("@"):
+        ref_text = selector_text
+        selector_text = ""
+    if ref_text and not ref_text.startswith("@"):
+        ref_text = f"@{ref_text}"
+    return selector_text, ref_text
+
+
+def _compact_action_params(params: dict[str, object]) -> dict[str, object]:
+    """Entfernt leere selector/ref-Felder für stabile Signaturen."""
+    compact = dict(params)
+    if not str(compact.get("selector", "")).strip():
+        compact.pop("selector", None)
+    if not str(compact.get("ref", "")).strip():
+        compact.pop("ref", None)
+    return compact
+
+
+def _failure_target_key(selector: object = "", ref: object = "") -> str:
+    """Ermittelt den stabilen Schlüssel fuer Selector-/Ref-Fehlschlaege."""
+    selector_text, ref_text = _normalize_selector_and_ref(selector, ref)
+    return ref_text or selector_text
+
+
 async def click_visible_button_with_text(text_hint: str):
     # -------------------------------------------------------------------------
     # FUNKTION: click_visible_button_with_text
@@ -1615,29 +2327,50 @@ async def click_visible_button_with_text(text_hint: str):
     """
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
-    js_code = f"""
-    (function() {{
-      const hint = {json.dumps(text_hint.lower())};
-      const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-      const el = candidates.find((node) => {{
-        const text = (node.textContent || '').trim().toLowerCase();
-        const visible = node.offsetParent !== null;
-        return visible && text.includes(hint);
-      }});
-      if (!el) return {{ clicked: false, reason: 'not found', hint: hint }};
-      if (typeof el.focus === 'function') el.focus();
-      if (typeof el.click === 'function') el.click();
-      else el.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true, view: window }}));
-      return {{
-        clicked: true,
-        text: (el.textContent || '').trim().substring(0, 120),
-        tag: el.tagName,
-        id: el.id || '',
-        cls: (el.className || '').toString().substring(0, 120)
-      }};
-    }})();
-    """
-    return await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
+    hint = text_hint.lower().strip()
+    scan = await execute_bridge(
+        "dom.queryAll",
+        {"selector": 'button, a, [role="button"]', **tab_params},
+    )
+    items = scan.get("items", []) if isinstance(scan, dict) else []
+    if not isinstance(items, list):
+        items = []
+
+    chosen: dict[str, object] | None = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "") or "").strip().lower()
+        selector = str(item.get("selector", "") or "").lower()
+        if text and hint in text:
+            chosen = item
+            break
+        if hint in selector:
+            chosen = item
+            break
+
+    if not chosen:
+        return {"clicked": False, "reason": "not found", "hint": hint}
+
+    selected_selector = _prefer_explicit_native_selector(chosen)
+    selected_selector, ref_value = _normalize_selector_and_ref(selected_selector, chosen.get("ref"))
+    display_target = selected_selector or ref_value
+    if ref_value:
+        if not display_target or _is_generic_native_selector(display_target):
+            display_target = ref_value
+        result = await execute_bridge("click_ref", {"ref": ref_value, **tab_params})
+    else:
+        click_args: dict[str, object] = {**tab_params}
+        if selected_selector:
+            click_args["selector"] = selected_selector
+        result = await execute_bridge("dom.click", click_args)
+    return {
+        "clicked": True,
+        "text": str(chosen.get("text", "") or "")[:120],
+        "tag": chosen.get("tag", ""),
+        "selector": display_target,
+        "result": result,
+    }
 
 
 # ============================================================================
@@ -1651,6 +2384,36 @@ async def detect_captcha_page() -> bool:
     """Erkennt Captcha-Präsenz via DOM-Scan."""
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
+    if _bridge_v2_enabled():
+        # V2: Native DOM-Query statt JS-Eval. Reine Sichtbarkeit + Text-Marker.
+        captcha_selectors = (
+            ".recaptcha-checkbox, .g-recaptcha, #recaptcha-anchor, "
+            'iframe[src*="recaptcha"], [title="reCAPTCHA"], '
+            '.h-captcha, iframe[src*="hcaptcha"], '
+            '.cf-turnstile, iframe[src*="turnstile"], '
+            '.captcha-checkbox, [class*="captcha"], '
+            '[class*="verify"][class*="human"]'
+        )
+        try:
+            scan = await execute_bridge(
+                "dom.queryAll", {"selector": captcha_selectors, **tab_params}
+            )
+            items = scan.get("items", []) if isinstance(scan, dict) else []
+            if isinstance(items, list) and items:
+                return True
+
+            snapshot = await execute_bridge("snapshot", {**tab_params, "includeScreenshot": False})
+            nodes = snapshot.get("nodes", []) if isinstance(snapshot, dict) else []
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                text = f"{node.get('name', '')} {node.get('selector', '')}".lower()
+                if any(marker in text for marker in ("captcha", "not a robot", "verify", "human")):
+                    return True
+        except Exception as e:
+            audit("captcha_scan_error_v2", error=str(e))
+        return False
+
     js_code = """
     (function() {
         var captchaSelectors = [
@@ -1696,6 +2459,58 @@ async def handle_captcha() -> bool:
         return False
     _captcha_attempt_count += 1
     tab_params = _tab_params()
+    if _bridge_v2_enabled():
+        # V2: Keine JS-Klicks; wir arbeiten mit dom.queryAll/dom.click.
+        try:
+            checkbox_selectors = (
+                ".recaptcha-checkbox, #recaptcha-anchor, "
+                '.captcha-checkbox, [title="reCAPTCHA"], '
+                '[class*="recaptcha"][class*="checkbox"]'
+            )
+            scan = await execute_bridge(
+                "dom.queryAll", {"selector": checkbox_selectors, **tab_params}
+            )
+            items = scan.get("items", []) if isinstance(scan, dict) else []
+            if isinstance(items, list) and items:
+                target = items[0]
+                if isinstance(target, dict):
+                    target_selector, target_ref = _normalize_selector_and_ref(
+                        target.get("selector"), target.get("ref")
+                    )
+                    if target_ref:
+                        await execute_bridge("click_ref", {"ref": target_ref, **tab_params})
+                    elif target_selector:
+                        await execute_bridge(
+                            "dom.click", {"selector": target_selector, **tab_params}
+                        )
+                await asyncio.sleep(3 + random.random() * 3)
+                return True
+
+            btn_scan = await execute_bridge(
+                "dom.queryAll", {"selector": 'button, a, [role="button"]', **tab_params}
+            )
+            buttons = btn_scan.get("items", []) if isinstance(btn_scan, dict) else []
+            if isinstance(buttons, list):
+                for btn in buttons:
+                    if not isinstance(btn, dict):
+                        continue
+                    text = str(btn.get("text", "") or "").lower()
+                    if any(token in text for token in ("refresh", "reload", "neues", "anderes")):
+                        btn_selector, btn_ref = _normalize_selector_and_ref(
+                            btn.get("selector"), btn.get("ref")
+                        )
+                        if btn_ref:
+                            await execute_bridge("click_ref", {"ref": btn_ref, **tab_params})
+                        elif btn_selector:
+                            await execute_bridge(
+                                "dom.click", {"selector": btn_selector, **tab_params}
+                            )
+                        await asyncio.sleep(3 + random.random() * 3)
+                        return True
+        except Exception as e:
+            audit("captcha_handle_error_v2", error=str(e))
+        return False
+
     js_code = """
     (function() {
         var checkboxSelectors = [
@@ -1753,6 +2568,79 @@ async def resolve_survey_selector(selector: str, description: str = "") -> str:
 
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
+    if _bridge_v2_enabled():
+        # V2: native dom.queryAll statt JS. Wir holen Survey-Kacheln direkt
+        # per CSS und wählen anhand des Preises oder der höchsten Vergütung.
+        try:
+            scan = await execute_bridge(
+                "dom.queryAll",
+                {
+                    "selector": "div.survey-item, [id^='survey-'], .survey-card, [data-survey-id]",
+                    **tab_params,
+                },
+            )
+            cards = scan.get("items", []) if isinstance(scan, dict) else []
+            if not isinstance(cards, list) or not cards:
+                return selector
+
+            price_hint = None
+            for source in (description or "", selector):
+                m = re.search(r"(\d+[.,]\d+)\s*€", source)
+                if m:
+                    price_hint = m.group(1).replace(",", ".")
+                    break
+
+            def _card_price(card: dict[str, object]) -> float | None:
+                text = str(card.get("text", ""))
+                m = re.search(r"(\d+[.,]\d+)\s*€", text)
+                if not m:
+                    return None
+                try:
+                    return float(m.group(1).replace(",", "."))
+                except Exception:
+                    return None
+
+            chosen = None
+            if price_hint is not None:
+                for card in cards:
+                    if not isinstance(card, dict):
+                        continue
+                    text = str(card.get("text", ""))
+                    if price_hint in text.replace(",", "."):
+                        chosen = card
+                        break
+
+            if chosen is None:
+                priced_cards = []
+                for card in cards:
+                    if not isinstance(card, dict):
+                        continue
+                    price = _card_price(card)
+                    if price is not None:
+                        priced_cards.append((price, card))
+                if priced_cards:
+                    priced_cards.sort(key=lambda item: item[0], reverse=True)
+                    chosen = priced_cards[0][1]
+
+            if chosen and isinstance(chosen, dict):
+                resolved = _prefer_explicit_native_selector(chosen)
+                resolved, ref_value = _normalize_selector_and_ref(resolved, chosen.get("ref"))
+                if not resolved or _is_generic_native_selector(resolved):
+                    if ref_value:
+                        resolved = ref_value
+                if resolved:
+                    if resolved != selector:
+                        audit(
+                            "state_change",
+                            message=(
+                                f"Survey-Selector auf nativen Snapshot-Target aufgelöst: {selector[:80]} -> {resolved}"
+                            ),
+                        )
+                    return resolved
+        except Exception as e:
+            audit("survey_selector_resolve_error_v2", error=str(e))
+            return selector
+
     js_code = """
     (function() {
       const cards = Array.from(document.querySelectorAll('div.survey-item')).map((el) => {
@@ -1942,25 +2830,19 @@ async def execute_bridge(method: str, params: dict[str, object] | None = None):
       - bridge_retry.is_transient_bridge_error() entscheidet was "transient" ist
     """
     started_at = time.time()
-    call_params = params or {}
+    call_params = dict(params or {})
 
-    # WHY: Methoden die Seiteneffekte erzeugen wie "click_ref" oder "type_text"
-    # sollten NICHT automatisch retried werden — der erste Aufruf koennte
-    # durchgegangen sein und ein zweiter wuerde doppelt klicken/tippen.
-    # Nur reine Lese-/Idempotente Methoden retriesen.
-    idempotent_methods = {
-        "screenshot",
-        "execute_javascript",
-        "get_snapshot",
-        "snapshot",
-        "get_clickable_snapshot",
-        "export_all_cookies",
-        "list_tabs",
-        "get_active_tab",
-        "get_url",
-        "get_page_state",
-    }
-    should_retry = method in idempotent_methods
+    if _bridge_v2_enabled() and method != "bridge.contract" and BRIDGE_CONTRACT_INFO is None:
+        try:
+            await _pin_bridge_contract_if_needed()
+        except Exception:
+            # Boot-gating geschieht an den echten Startpunkten (main / preflight).
+            # Einzelne Hilfsaufrufe koennen hier dennoch weiterlaufen, falls der
+            # Call nicht zur Contract-Pinning-Phase gehoert.
+            pass
+
+    method, call_params = _translate_v2_bridge_method(method, call_params)
+    should_retry = _bridge_contract_is_retryable(method)
 
     async def _one_call() -> object:
         raw = await asyncio.to_thread(
@@ -2156,20 +3038,30 @@ async def dom_prescan():
     snapshot_info = ""
     try:
         snapshot = await execute_bridge("snapshot", {**tab_params, "includeScreenshot": False})
-        if isinstance(snapshot, dict) and "tree" in snapshot:
-            tree = snapshot["tree"]
-            # Nur interaktive Elemente (mit @eX Refs) extrahieren
-            interactive = [l.strip() for l in tree.splitlines() if "@e" in l]
-            if interactive:
-                snapshot_info = "ACCESSIBILITY-TREE REFS (nutzbar mit click_ref):\n" + "\n".join(
-                    interactive[:20]
-                )
+        snapshot_info, interactive_count = _format_snapshot_prompt_block(snapshot)
+        if interactive_count or snapshot_info:
             audit(
                 "action",
-                message=f"DOM Pre-Scan: {len(interactive)} interactive refs, {snapshot.get('refCount', 0)} total refs",
+                message=(
+                    f"DOM Pre-Scan: {interactive_count} interactive refs, "
+                    f"{len(snapshot.get('nodes', [])) if isinstance(snapshot, dict) else 0} total nodes"
+                ),
             )
     except Exception as e:
         audit("error", message=f"Snapshot fehlgeschlagen: {e}")
+
+    if _bridge_v2_enabled():
+        # V2: Kein JS-Scanning mehr. Der native Snapshot liefert bereits
+        # klickbare Refs + Selektoren ohne CSP/unsafe-eval-Probleme.
+        page_context = ""
+        try:
+            page_info = await execute_bridge("get_page_info", tab_params)
+            url, title, _status = _page_info_fields(page_info)
+            if url or title:
+                page_context = f"AKTUELLE SEITE: URL={url or '?'} Title={title or '?'}"
+        except Exception:
+            pass
+        return "\n\n".join(block for block in (snapshot_info, page_context) if block)
 
     # 2. Echte HTML-Elemente mit Klick-Potential scannen
     # WHY (Issue #61 Fix F3): Frueher wurde der kombinierte Selektor auf 25
@@ -2264,8 +3156,8 @@ async def dom_prescan():
                         survey_count += 1
                     lines.append(
                         f'  - priority={prio} selector="{selector}" text="{text}" '
-                        f'pos=({el.get("x")},{el.get("y")}) size={el.get("w")}x{el.get("h")} '
-                        f'cursor={el.get("cursor")}'
+                        f"pos=({el.get('x')},{el.get('y')}) size={el.get('w')}x{el.get('h')} "
+                        f"cursor={el.get('cursor')}"
                     )
                 clickable_info = (
                     "KLICKBARE ELEMENTE AUF DER SEITE (ECHTE CSS-Selektoren!):\n" + "\n".join(lines)
@@ -2284,8 +3176,9 @@ async def dom_prescan():
     page_context = ""
     try:
         page_info = await execute_bridge("get_page_info", tab_params)
-        if isinstance(page_info, dict):
-            page_context = f"AKTUELLE SEITE: URL={page_info.get('url', '?')} Title={page_info.get('title', '?')}"
+        url, title, _status = _page_info_fields(page_info)
+        if url or title:
+            page_context = f"AKTUELLE SEITE: URL={url or '?'} Title={title or '?'}"
     except Exception:
         pass
 
@@ -2840,18 +3733,15 @@ async def dom_prescan():
     # URL-Heuristik: heypiggy-Domain + KEINE Survey-Detail-Seite
     _on_heypiggy = ("heypiggy.com" in current_url_low) or ("heypiggy" in page_context_low)
     _is_survey_detail = (
-        "/survey/" in current_url_low
-        or "/s/" in current_url_low
-        or "survey_id=" in current_url_low
+        "/survey/" in current_url_low or "/s/" in current_url_low or "survey_id=" in current_url_low
     )
     # DOM-Signal: wurden im Clickable-Scan tatsaechlich Survey-Kacheln gefunden?
     # (Stufe 1 des js_scan schreibt priority='survey' in die Elemente.)
     _dom_has_survey_cards = "priority=survey" in (clickable_info or "") or "#survey-" in (
         clickable_info or ""
     )
-    is_dashboard = (
-        (_on_heypiggy and not _is_survey_detail and _dom_has_survey_cards)
-        or ("Deine verfügbaren Erhebungen".lower() in page_context_low)
+    is_dashboard = (_on_heypiggy and not _is_survey_detail and _dom_has_survey_cards) or (
+        "Deine verfügbaren Erhebungen".lower() in page_context_low
     )
     # Rating/Survey/Obstacle-Pages nicht ueberschreiben
     if is_dashboard and _LAST_OBSTACLE_KIND is None and _LAST_RATING_PAGE is None:
@@ -4291,7 +5181,9 @@ ANTWORT-FORMAT (NUR dieses JSON, NICHTS anderes):
             if start != -1 and end != -1 and end > start:
                 full_text = full_text[start : end + 1]
 
-        result = json.loads(full_text)
+        result = _extract_vision_json(full_text)
+        if result is None:
+            raise json.JSONDecodeError("No valid vision JSON object found", full_text, 0)
         audit(
             "vision_check",
             step=step_num,
@@ -4371,40 +5263,16 @@ async def keyboard_action(keys: list, selector: str = ""):
     results = []
     for key_name in keys:
         kp = key_map.get(key_name, {"key": key_name, "code": key_name, "keyCode": 0})
-
-        # Wenn ein Selektor angegeben ist, erst auf das Element fokussieren
-        focus_part = ""
-        if selector:
-            focus_part = f"""
-                var target = document.querySelector("{selector}");
-                if (target && typeof target.focus === 'function') {{
-                    target.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                    target.focus();
-                }}
-            """
-
-        js_code = f"""
-        (function() {{
-            {focus_part}
-            var el = document.activeElement || document.body;
-            var opts = {{
-                key: "{kp["key"]}", code: "{kp["code"]}",
-                keyCode: {kp["keyCode"]}, which: {kp["keyCode"]},
-                bubbles: true, cancelable: true, composed: true,
-                view: window
-            }};
-            el.dispatchEvent(new KeyboardEvent('keydown', opts));
-            el.dispatchEvent(new KeyboardEvent('keypress', opts));
-            el.dispatchEvent(new KeyboardEvent('keyup', opts));
-            return {{
-                success: true, key: "{key_name}",
-                target: el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + (el.className + '').split(' ')[0] : ''),
-                focused: el === document.activeElement
-            }};
-        }})();
-        """
         try:
-            result = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
+            if selector:
+                try:
+                    await execute_bridge("dom.focus", {"selector": selector, **tab_params})
+                except Exception:
+                    pass
+            try:
+                result = await execute_bridge("dom.press", {"key": kp["key"], **tab_params})
+            except Exception:
+                result = await execute_bridge("dom.press", {"keys": [kp["key"]], **tab_params})
             audit("keyboard", key=key_name, result=str(result)[:150])
             results.append(result)
             # Kurze Pause zwischen Tasten wie ein Mensch
@@ -4442,16 +5310,14 @@ async def dom_verify_change(before_url: str, before_title: str):
 
     try:
         page_info = await execute_bridge("get_page_info", tab_params)
-        current_url = page_info.get("url", "") if isinstance(page_info, dict) else ""
-        current_title = page_info.get("title", "") if isinstance(page_info, dict) else ""
+        current_url, current_title, _status = _page_info_fields(page_info)
 
         if not current_url and not current_title:
             # Tab may still be loading — wait briefly and retry once with same tabId
             # NEVER switch to a different tab or recover to a new one here
             await asyncio.sleep(1.5)
             page_info = await execute_bridge("get_page_info", tab_params)
-            current_url = page_info.get("url", "") if isinstance(page_info, dict) else ""
-            current_title = page_info.get("title", "") if isinstance(page_info, dict) else ""
+            current_url, current_title, _status = _page_info_fields(page_info)
 
         url_changed = current_url != before_url
         title_changed = current_title != before_title
@@ -4459,13 +5325,15 @@ async def dom_verify_change(before_url: str, before_title: str):
         # Auch DOM-Diff via Bridge page_diff abfragen (vergleicht Accessibility Trees)
         dom_diff = None
         try:
-            diff_result = await execute_bridge("page_diff", tab_params)
-            if isinstance(diff_result, dict):
-                dom_diff = {
-                    "added": diff_result.get("addedCount", 0),
-                    "removed": diff_result.get("removedCount", 0),
-                    "changed": diff_result.get("changedCount", 0),
-                }
+            tool_names = await _bridge_tool_names()
+            if "page_diff" in tool_names:
+                diff_result = await execute_bridge("page_diff", tab_params)
+                if isinstance(diff_result, dict):
+                    dom_diff = {
+                        "added": diff_result.get("addedCount", 0),
+                        "removed": diff_result.get("removedCount", 0),
+                        "changed": diff_result.get("changedCount", 0),
+                    }
         except Exception:
             pass
 
@@ -4569,6 +5437,7 @@ async def escalating_click(
     tab_params = _tab_params()
     selector = normalize_selector(selector)
     selector = await resolve_survey_selector(selector, description)
+    selector, ref = _normalize_selector_and_ref(selector, ref)
     if not selector and description:
         desc_lower = description.lower()
         if "umfrage" in desc_lower or "survey" in desc_lower or "€" in desc_lower:
@@ -4579,21 +5448,19 @@ async def escalating_click(
         methods.append(("click_ref", {**tab_params, "ref": ref}))
     if selector:
         methods.append(("click_element", {**tab_params, "selector": selector}))
-    if selector:
+    if selector and not _bridge_v2_enabled():
         methods.append(("ghost_click_js", selector))
     if selector:
         methods.append(("keyboard_focus_enter", selector))
     if description:
         methods.append(("vision_click", {**tab_params, "description": description}))
-    if x is not None and y is not None:
+    if x is not None and y is not None and not _bridge_v2_enabled():
         methods.append(("click_coordinates_js", (x, y)))
 
     before_url, before_title = "", ""
     try:
         pi = await execute_bridge("get_page_info", tab_params)
-        if isinstance(pi, dict):
-            before_url = pi.get("url", "")
-            before_title = pi.get("title", "")
+        before_url, before_title, _status = _page_info_fields(pi)
     except Exception:
         pass
 
@@ -4889,6 +5756,31 @@ async def save_session(label: str):
     except Exception as e:
         audit("session_persistent_error", label=label, error=str(e))
 
+    if _bridge_v2_enabled():
+        try:
+            profile = _active_platform()
+            tool_names = await _bridge_tool_names()
+            if "session.manifest" not in tool_names:
+                audit(
+                    "session_manifest_skipped",
+                    label=label,
+                    reason="session.manifest not listed in system.capabilities",
+                )
+            else:
+                manifest_result = await execute_bridge(
+                    "session.manifest",
+                    {
+                        "origin": profile.dashboard_url,
+                        "tabId": CURRENT_TAB_ID,
+                        "ttlSeconds": 72 * 3600,
+                        "source": "runtime",
+                        "note": label,
+                    },
+                )
+                audit("session_manifest_saved", label=label, result=str(manifest_result)[:160])
+        except Exception as e:
+            audit("session_manifest_error", label=label, error=str(e))
+
 
 # ============================================================================
 # HUMAN DELAYS — Zufällige Pausen gegen Bot-Erkennung
@@ -5097,12 +5989,14 @@ class VisionGateController:
     # -------------------------------------------------------------------------
     
         """Merkt sich einen fehlgeschlagenen Selektor um ihn nicht nochmal zu versuchen."""
-        if selector:
-            self.failed_selectors[selector] = self.failed_selectors.get(selector, 0) + 1
+        key = _failure_target_key(selector)
+        if key:
+            self.failed_selectors[key] = self.failed_selectors.get(key, 0) + 1
 
     def is_selector_failed(self, selector: str) -> bool:
         """Prüft ob ein Selektor bereits fehlgeschlagen ist."""
-        return self.failed_selectors.get(selector, 0) >= 3
+        key = _failure_target_key(selector)
+        return self.failed_selectors.get(key, 0) >= 3
 
     def record_action(self, screenshot_hash: str, action: str, params: dict) -> bool:
         signature = (screenshot_hash or "", action, json.dumps(params, sort_keys=True))
@@ -5218,6 +6112,13 @@ async def attempt_google_login(email: str) -> dict:
     """
     tab_params = _tab_params()
     audit("google_login_start", email=email[:20] + "..." if email else "")
+
+    if _bridge_v2_enabled():
+        audit(
+            "google_login_skipped",
+            reason="v2 bridge uses session restore + native DOM tools",
+        )
+        return {"ok": False, "reason": "google_login_skipped_v2"}
 
     try:
         google_btn_js = """
@@ -5391,10 +6292,16 @@ async def run_click_action(next_params: dict, gate, img_hash: str, step_num: int
     y = next_params.get("y")
     ref = next_params.get("ref", "")
 
-    if selector and gate.is_selector_failed(selector):
+    # Manche nativen Bridge-Snapshots geben Accessibility-Refs in selector-Form
+    # zurück (z.B. "@e9"). Das ist KEIN CSS-Selektor und muss deshalb vor der
+    # normalen Click-Eskalation in `ref` umgewandelt werden.
+    selector, ref = _normalize_selector_and_ref(selector, ref)
+    failure_target = ref or selector
+
+    if failure_target and gate.is_selector_failed(failure_target):
         audit(
             "state_change",
-            message=f"Selektor '{selector[:50]}' bereits fehlgeschlagen, überspringe",
+            message=f"Ziel '{failure_target[:50]}' bereits fehlgeschlagen, überspringe",
         )
         gate.record_step("RETRY", img_hash)
         return False
@@ -5409,8 +6316,9 @@ async def run_click_action(next_params: dict, gate, img_hash: str, step_num: int
     )
 
     if not clicked:
-        if selector:
-            gate.add_failed_selector(selector)
+        failure_target = ref or selector
+        if failure_target:
+            gate.add_failed_selector(failure_target)
         audit("error", message="Klick-Eskalation komplett fehlgeschlagen")
 
     return clicked
@@ -5420,6 +6328,17 @@ def _write_structured_run_summary(run_summary: RunSummary, gate) -> Path:
     summary = run_summary.to_dict(include_steps=True)
     summary["artifact_dir"] = str(ARTIFACT_DIR)
     summary["screenshots"] = len(list(SCREENSHOT_DIR.glob("*.png")))
+    summary["opensin_v2"] = _bridge_v2_enabled()
+    if BRIDGE_CONTRACT_INFO is not None:
+        summary["bridge_contract"] = {
+            "version": BRIDGE_CONTRACT_INFO.get("version"),
+            "revision": BRIDGE_CONTRACT_INFO.get("revision"),
+            "methods": len(BRIDGE_CONTRACT_METHODS),
+        }
+    if BRIDGE_EVIDENCE_PATH is not None:
+        summary["bridge_evidence_path"] = str(BRIDGE_EVIDENCE_PATH)
+    if BRIDGE_TRACES_PATH is not None:
+        summary["bridge_traces_path"] = str(BRIDGE_TRACES_PATH)
     if AUDIT_LOG_PATH.exists():
         with open(AUDIT_LOG_PATH, encoding="utf-8") as _fh:
             summary["audit_entries"] = sum(1 for _ in _fh)
@@ -5524,6 +6443,47 @@ def _should_generate_fail_replay(exit_reason: str) -> bool:
     return exit_reason not in {"vision_done", "loop_finished"}
 
 
+async def _collect_bridge_forensics() -> tuple[Path | None, Path | None]:
+    """Collect bridge evidence + traces for the active tab when V2 is enabled."""
+    global BRIDGE_EVIDENCE_PATH, BRIDGE_TRACES_PATH
+
+    if not _bridge_v2_enabled() or CURRENT_TAB_ID is None:
+        return BRIDGE_EVIDENCE_PATH, BRIDGE_TRACES_PATH
+
+    try:
+        evidence = await execute_bridge(
+            "bridge.evidenceBundle",
+            {
+                "tabId": CURRENT_TAB_ID,
+                "traceId": BRIDGE_TRACE_ID,
+                "includeScreenshot": True,
+                "maxNetworkEvents": 50,
+            },
+        )
+        if isinstance(evidence, dict):
+            BRIDGE_EVIDENCE_PATH = ARTIFACT_DIR / "bridge_evidence_bundle.json"
+            BRIDGE_EVIDENCE_PATH.write_text(
+                json.dumps(evidence, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+    except Exception as exc:
+        audit("bridge_evidence_error", error=str(exc))
+
+    try:
+        traces = await execute_bridge(
+            "bridge.traces",
+            {"traceId": BRIDGE_TRACE_ID, "limit": 100},
+        )
+        if isinstance(traces, dict):
+            BRIDGE_TRACES_PATH = ARTIFACT_DIR / "bridge_traces.json"
+            BRIDGE_TRACES_PATH.write_text(
+                json.dumps(traces, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+    except Exception as exc:
+        audit("bridge_trace_error", error=str(exc))
+
+    return BRIDGE_EVIDENCE_PATH, BRIDGE_TRACES_PATH
+
+
 async def _finalize_worker_run(
     run_summary: RunSummary,
     gate,
@@ -5536,6 +6496,9 @@ async def _finalize_worker_run(
     resolved_exit_reason = _resolve_terminal_exit_reason(final_exit_reason, gate)
     if recorder is not None:
         await recorder.stop()
+
+    if _bridge_v2_enabled():
+        await _collect_bridge_forensics()
 
     run_summary.finalize(exit_reason=resolved_exit_reason, page_state=final_page_state)
     summary_path = _write_structured_run_summary(run_summary, gate)
@@ -5801,9 +6764,11 @@ async def main():
         tab_res = await execute_bridge(
             "tabs_create", {"url": "https://www.heypiggy.com/login", "active": True}
         )
-        if isinstance(tab_res, dict) and "tabId" in tab_res:
-            CURRENT_TAB_ID = tab_res["tabId"]
-            CURRENT_WINDOW_ID = tab_res.get("windowId", CURRENT_WINDOW_ID)
+        tab_id, window_id = _extract_tab_binding(tab_res)
+        if tab_id is not None:
+            CURRENT_TAB_ID = tab_id
+            if window_id is not None:
+                CURRENT_WINDOW_ID = window_id
             audit(
                 "success",
                 message=f"Worker-Tab erstellt und gebunden: tabId={CURRENT_TAB_ID}, windowId={CURRENT_WINDOW_ID}",
@@ -5949,15 +6914,21 @@ async def main():
     return { stealth: 'ok', ts: Date.now() };
 })();
 """
-        stealth_result = await execute_bridge(
-            "execute_javascript",
-            {"script": stealth_js, **_tab_params()},
-        )
-        audit(
-            "stealth_injected",
-            result=str(stealth_result)[:120],
-            message="Stealth Layer aktiv: webdriver/canvas/webgl/plugins maskiert",
-        )
+        if _bridge_v2_enabled():
+            audit(
+                "stealth_skipped_v2",
+                message="V2 bridge uses native behavior/DOM tools; JS stealth injection skipped",
+            )
+        else:
+            stealth_result = await execute_bridge(
+                "execute_javascript",
+                {"script": stealth_js, **_tab_params()},
+            )
+            audit(
+                "stealth_injected",
+                result=str(stealth_result)[:120],
+                message="Stealth Layer aktiv: webdriver/canvas/webgl/plugins maskiert",
+            )
     except Exception as se:
         # Stealth-Fehler darf den Worker NIEMALS stoppen
         audit("stealth_inject_error", error=str(se))
@@ -5989,10 +6960,7 @@ async def main():
             )
             # Reload damit die restaurierten Cookies/Storage greifen
             try:
-                await execute_bridge(
-                    "execute_javascript",
-                    {"script": "location.reload();", **_tab_params()},
-                )
+                await execute_bridge("reload", _tab_params())
                 await human_delay(3.5, 5.0)
             except Exception as re:
                 audit("session_restore_reload_error", error=str(re))
@@ -6009,13 +6977,7 @@ async def main():
     # CONSEQUENCES: Bei Fehler ignorieren — Vision-Loop übernimmt den Login.
     _google_login_attempted = False
     try:
-        _url_check_js = "document.location.href"
-        _url_res = await execute_bridge(
-            "execute_javascript", {"script": _url_check_js, **_tab_params()}
-        )
-        _current_url = ""
-        if isinstance(_url_res, dict):
-            _current_url = str(_url_res.get("result", "") or "")
+        _current_url = await _active_tab_url()
         if "login" in _current_url or "signin" in _current_url or not _current_url:
             _google_result = await attempt_google_login(email or "")
             _google_login_attempted = True
@@ -6050,13 +7012,7 @@ async def main():
         same_streak = 0
         while time.monotonic() < deadline:
             try:
-                res = await execute_bridge(
-                    "execute_javascript",
-                    {"script": "document.location.href", **_tab_params()},
-                )
-                url = ""
-                if isinstance(res, dict):
-                    url = str(res.get("result", "") or "")
+                url = await _active_tab_url()
                 if url and url == last_url:
                     same_streak += 1
                     if same_streak >= 2:  # 3 gleiche Messungen → stabil
@@ -6075,8 +7031,7 @@ async def main():
 
         _is_heypiggy = "heypiggy.com" in (stable_url or "").lower()
         _is_survey_detail = (
-            "/survey/" in (stable_url or "").lower()
-            or "/s/" in (stable_url or "").lower()
+            "/survey/" in (stable_url or "").lower() or "/s/" in (stable_url or "").lower()
         )
         _is_google_oauth = "accounts.google." in (stable_url or "").lower()
 
@@ -6465,9 +7420,7 @@ async def main():
         try:
             pi_params = _tab_params()
             pi = await execute_bridge("get_page_info", pi_params)
-            if isinstance(pi, dict):
-                before_url = pi.get("url", "")
-                before_title = pi.get("title", "")
+            before_url, before_title, _status = _page_info_fields(pi)
         except Exception:
             pass
 
@@ -6484,7 +7437,7 @@ async def main():
             "survey_video",
             "survey_image",
             "onboarding",
-        ) and next_action in CLICK_ACTIONS.union({"type_text", "select_option"}):
+        ) and next_action in (CLICK_ACTIONS + ("type_text", "select_option")):
             trap_hint = str(decision.get("trap_detected") or "none").strip() or "none"
             if _LAST_SCREENER_HIT and trap_hint == "none":
                 trap_hint = "screening"
@@ -6537,60 +7490,17 @@ async def main():
                 value = sel_params.get("value", "")
                 label = sel_params.get("label", "") or sel_params.get("text", "")
                 ref = sel_params.get("ref", "")
+                selector, ref = _normalize_selector_and_ref(selector, ref)
+                sel_params["selector"] = selector
+                sel_params["ref"] = ref
                 # Native-Select-Pfad wenn Selektor vorhanden und nicht ref-style
-                if selector and not selector.startswith("@"):
-                    sel_escaped = selector.replace("'", "\\'")
-                    val_escaped = str(value).replace("'", "\\'")
-                    lab_escaped = str(label).replace("'", "\\'")
-                    js = (
-                        "(function(){"
-                        f"var el=document.querySelector('{sel_escaped}');"
-                        "if(!el||el.tagName.toLowerCase()!=='select')return{ok:false,reason:'not_native_select'};"
-                        "var opts=Array.from(el.options);"
-                        "var picked=null;"
-                        f"var want_val='{val_escaped}'.toLowerCase();"
-                        f"var want_lab='{lab_escaped}'.toLowerCase();"
-                        "for(var i=0;i<opts.length;i++){"
-                        "  var o=opts[i];"
-                        "  var ov=(o.value||'').toLowerCase();"
-                        "  var ot=(o.text||'').toLowerCase();"
-                        "  if(want_val && ov===want_val){picked=o;break;}"
-                        "  if(want_lab && (ot===want_lab||ot.indexOf(want_lab)!==-1)){picked=o;break;}"
-                        "}"
-                        "if(!picked)return{ok:false,reason:'no_match',available:opts.slice(0,12).map(function(o){return o.text;})};"
-                        "el.value=picked.value;"
-                        "el.dispatchEvent(new Event('input',{bubbles:true}));"
-                        "el.dispatchEvent(new Event('change',{bubbles:true}));"
-                        "return{ok:true,chosen:picked.text,value:picked.value};"
-                        "})();"
+                if selector:
+                    result = await execute_bridge("select_option", sel_params)
+                    audit(
+                        "native_select_set",
+                        selector=selector[:60],
+                        chosen=str(result)[:120],
                     )
-                    try:
-                        r = await execute_bridge(
-                            "execute_javascript", {"script": js, **_tab_params()}
-                        )
-                        result = r.get("result") if isinstance(r, dict) else None
-                        if isinstance(result, dict) and result.get("ok"):
-                            audit(
-                                "native_select_set",
-                                selector=selector[:60],
-                                chosen=result.get("chosen"),
-                            )
-                        else:
-                            # Fallback: bridge's select_option
-                            audit(
-                                "native_select_fallback",
-                                selector=selector[:60],
-                                reason=result.get("reason")
-                                if isinstance(result, dict)
-                                else "unknown",
-                            )
-                            await execute_bridge("select_option", sel_params)
-                    except Exception as se:
-                        audit("native_select_error", error=str(se))
-                        await execute_bridge("select_option", sel_params)
-                elif ref:
-                    # Ref-basiert -> bridge's select_option
-                    await execute_bridge("select_option", sel_params)
                 else:
                     await execute_bridge("select_option", sel_params)
 
@@ -6604,10 +7514,14 @@ async def main():
             elif next_action == "type_text":
                 params = {**next_params, **_tab_params()}
                 selector = params.get("selector", "")
+                ref = params.get("ref", "")
                 text = params.get("text", "")
+                selector, ref = _normalize_selector_and_ref(selector, ref)
+                params["selector"] = selector
+                params["ref"] = ref
                 # Fokus setzen
-                if selector and (selector.startswith("@") or "@e" in selector):
-                    await execute_bridge("click_ref", {"ref": selector, **_tab_params()})
+                if ref:
+                    await execute_bridge("click_ref", {"ref": ref, **_tab_params()})
                     await asyncio.sleep(0.4 + random.random() * 0.3)
                 elif selector:
                     # Normaler CSS-Selektor: erst click dann tippen
