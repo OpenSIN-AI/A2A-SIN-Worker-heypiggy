@@ -7,6 +7,7 @@ from global_brain_policy import (
     SecretDetection,
     SecretSource,
     build_secret_fact,
+    classify_env_key,
     hash_secret_value,
     must_sync_now,
     normalize_env_key,
@@ -58,3 +59,9 @@ def test_build_secret_fact_redacts_and_hashes():
     assert fact["hash"].startswith("sha256:")
     assert fact["target"]["vault"] == "infisical"
     assert fact["key"] == "NVIDIA_API_KEY"
+
+
+def test_classify_env_key_is_secret_aware():
+    assert classify_env_key("NVIDIA_API_KEY") == "secret"
+    assert classify_env_key("HEYPIGGY_EMAIL") == "secret"
+    assert classify_env_key("BRIDGE_MCP_URL") == "env"

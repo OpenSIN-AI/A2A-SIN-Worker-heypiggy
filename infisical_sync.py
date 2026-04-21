@@ -13,6 +13,7 @@ Design goals:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
@@ -26,6 +27,7 @@ from global_brain_policy import (
     InfisicalTarget,
     SecretDetection,
     SecretSource,
+    classify_env_key,
     ingest_secret_event,
     normalize_env_key,
 )
@@ -38,6 +40,50 @@ def _slugify_segment(text: str) -> str:
     """Turn a folder/repo name into a stable Infisical path segment."""
     cleaned = re.sub(r"[^A-Za-z0-9]+", "-", text.lower()).strip("-")
     return re.sub(r"-+", "-", cleaned) or "env"
+
+
+def discover_default_roots(base_dir: Path | None = None) -> list[Path]:
+    """Discover likely OpenSIN env roots on this machine.
+
+    WHY: Humans forget to pass every worktree. The agent should auto-discover the
+    canonical dev roots it owns, then sync them without needing a manual list.
+    """
+    base = base_dir or Path(__file__).resolve().parent
+    candidates: list[Path] = [base]
+
+    # Sibling repo trees and local agent config directories that commonly hold
+    # env files, tokens, or runtime config.
+    home = Path.home()
+    common_roots = [
+        home / "dev",
+        home / ".config" / "opencode",
+        home / ".open-auth-rotator",
+        home / ".singularity",
+        home / ".claude",
+    ]
+    candidates.extend(common_roots)
+
+    for root in common_roots:
+        if not root.exists():
+            continue
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name.startswith(("OpenSIN", "A2A-SIN", "sin-", "Infra-SIN")):
+                candidates.append(child)
+
+    seen: set[Path] = set()
+    roots: list[Path] = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except OSError:
+            continue
+        if resolved in seen or not resolved.exists():
+            continue
+        seen.add(resolved)
+        roots.append(resolved)
+    return roots
 
 
 @dataclass(slots=True)
@@ -173,7 +219,7 @@ def sync_env_file_to_infisical(
                 detection = SecretDetection(
                     key=key,
                     value=value,
-                    classification="env" if key.isupper() else "secret",
+                    classification=classify_env_key(key),
                     source=SecretSource(
                         file=source.name,
                         path=str(source),
@@ -184,7 +230,7 @@ def sync_env_file_to_infisical(
                     branch=branch,
                     agent_id=agent_id,
                 )
-                ingest_secret_event(
+                _await_secret_fact(
                     brain,
                     detection,
                     target,
@@ -206,6 +252,38 @@ def sync_env_file_to_infisical(
             os.unlink(normalized.path)
         except OSError:
             pass
+
+
+def _await_secret_fact(
+    brain: GlobalBrainClient,
+    detection: SecretDetection,
+    target: InfisicalTarget,
+    *,
+    event: str,
+    status: str,
+    notes: str,
+) -> None:
+    """Run the async Brain ingest from sync code.
+
+    WHY: The sync path is called from CLI and preflight hooks that are already
+    synchronous. We keep the Brain integration non-blocking in design but force
+    a clean await boundary here so facts actually land.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(
+            ingest_secret_event(
+                brain,
+                detection,
+                target,
+                event=event,
+                status=status,
+                notes=notes,
+            )
+        )
+        return
+    raise RuntimeError("Cannot sync Infisical facts from inside a running event loop")
 
 
 def _verify_remote_mapping(
@@ -312,6 +390,7 @@ def sync_roots(
 __all__ = [
     "NormalizedEnvFile",
     "SyncResult",
+    "discover_default_roots",
     "parse_env_text",
     "normalize_env_file",
     "sync_env_file_to_infisical",

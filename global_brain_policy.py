@@ -20,6 +20,30 @@ from global_brain_client import GlobalBrainClient
 
 SYNCABLE_CLASSIFICATIONS = {"secret", "env", "credential"}
 LEGACY_SOURCES = {"local", "repo", "ci", "runtime", "scan"}
+SECRET_KEY_HINTS = (
+    "SECRET",
+    "TOKEN",
+    "PASSWORD",
+    "API_KEY",
+    "APIKEY",
+    "PRIVATE_KEY",
+    "SESSION",
+    "COOKIE",
+    "EMAIL",
+)
+ENV_KEY_HINTS = (
+    "URL",
+    "URI",
+    "HOST",
+    "PORT",
+    "PATH",
+    "DOMAIN",
+    "MODEL",
+    "TIMEOUT",
+    "COUNT",
+    "FLAG",
+    "MODE",
+)
 
 
 @dataclass(slots=True)
@@ -59,6 +83,22 @@ def normalize_env_key(key: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", cleaned)
     cleaned = re.sub(r"_+", "_", cleaned)
     return cleaned.upper().strip("_")
+
+
+def classify_env_key(key: str) -> str:
+    """Classify a key so policy facts can distinguish env config from secrets.
+
+    WHY: Uppercase alone is not a secret signal. We want a deterministic,
+    conservative heuristic that treats credential-looking names as secrets.
+    """
+    normalized = normalize_env_key(key)
+    if any(hint in normalized for hint in SECRET_KEY_HINTS):
+        return "secret"
+    if any(hint in normalized for hint in ENV_KEY_HINTS):
+        return "env"
+    # Conservative default: if it looks like a system variable but not a secret
+    # keyword, keep it as env. This avoids over-classifying URLs/ports as secrets.
+    return "env"
 
 
 def hash_secret_value(value: str | None) -> str | None:
@@ -179,6 +219,7 @@ __all__ = [
     "build_secret_fact",
     "hash_secret_value",
     "ingest_secret_event",
+    "classify_env_key",
     "must_sync_now",
     "normalize_env_key",
     "redact_value",

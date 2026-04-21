@@ -181,7 +181,7 @@ def _run_worker(args: argparse.Namespace, log: BoundLogger) -> int:
     from config import load_config_from_env  # legacy module
     from worker.context import WorkerContext
     from worker.loop import run_worker
-    from infisical_sync import sync_roots
+    from infisical_sync import discover_default_roots, sync_roots
 
     if args.run_id:
         os.environ["HEYPIGGY_RUN_ID"] = args.run_id
@@ -202,7 +202,7 @@ def _run_worker(args: argparse.Namespace, log: BoundLogger) -> int:
     # Infisical before the run starts so the worker and sibling agents share the
     # same source of truth.
     if cfg.infisical.enabled and cfg.infisical.auto_sync:
-        _maybe_auto_sync_infisical(cfg, log, sync_roots)
+        _maybe_auto_sync_infisical(cfg, log, sync_roots, discover_default_roots)
 
     with WorkerContext.from_config(cfg) as ctx:
         log.info(
@@ -305,7 +305,7 @@ def _run_infisical_sync(args: argparse.Namespace, log: BoundLogger) -> int:
     WHY: This gives the operator a single explicit command to collapse local
     env sprawl into the canonical vault before agents start consuming it.
     """
-    from infisical_sync import sync_roots
+    from infisical_sync import discover_default_roots, sync_roots
 
     token = os.environ.get("INFISICAL_TOKEN") or os.environ.get("INFISICAL_SERVICE_TOKEN")
     if not token:
@@ -314,7 +314,8 @@ def _run_infisical_sync(args: argparse.Namespace, log: BoundLogger) -> int:
         return _EXIT_CONFIG_ERROR
 
     roots = [
-        Path(root).expanduser() for root in (args.roots or [Path(__file__).resolve().parents[1]])
+        Path(root).expanduser()
+        for root in (args.roots or discover_default_roots(Path(__file__).resolve().parents[1]))
     ]
     repo_name = Path(__file__).resolve().parents[1].name
     results = sync_roots(
@@ -335,7 +336,9 @@ def _run_infisical_sync(args: argparse.Namespace, log: BoundLogger) -> int:
     return _EXIT_OK
 
 
-def _maybe_auto_sync_infisical(cfg: object, log: BoundLogger, sync_roots_fn) -> None:
+def _maybe_auto_sync_infisical(
+    cfg: object, log: BoundLogger, sync_roots_fn, discover_roots_fn
+) -> None:
     """Best-effort auto-sync hook used at worker startup.
 
     WHY: If auto-sync is enabled, we want to collapse local env state into
@@ -347,7 +350,7 @@ def _maybe_auto_sync_infisical(cfg: object, log: BoundLogger, sync_roots_fn) -> 
             log.warning("infisical_auto_sync_skipped", reason="missing token")
             return
         repo_root = Path(__file__).resolve().parents[1]
-        roots = list(getattr(cfg.infisical, "sync_roots", ()) or (repo_root,))
+        roots = list(getattr(cfg.infisical, "sync_roots", ()) or discover_roots_fn(repo_root))
         sync_roots_fn(
             roots,
             token=token,
