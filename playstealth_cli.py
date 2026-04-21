@@ -37,8 +37,10 @@ from playwright_stealth_worker import (
 
 from playstealth_actions.answer_survey import run as answer_survey_run
 from playstealth_actions.click_survey import run as click_survey_run
+from playstealth_actions.consent_modal import run as consent_modal_run
 from playstealth_actions.inspect_survey import run as inspect_survey_run
 from playstealth_actions.open_list import run as open_list_run
+from playstealth_actions.radio_question import run as radio_question_run
 from playstealth_actions.run_survey import run as run_survey_run
 
 WINDOW_WIDTH = 1024
@@ -300,53 +302,7 @@ async def _inspect_survey(page) -> None:
 
 async def _answer_survey(page, option_index: int):
     """Choose one modal option and advance one step."""
-    modal = page.locator("#survey-modal")
-    visible = await modal.is_visible()
-    print(f"🪟 survey-modal visible: {visible}")
-    if not visible:
-        raise RuntimeError("survey-modal not visible")
-
-    radios = modal.locator("input[type='radio'], input[type='checkbox']")
-    count = await radios.count()
-    print(f"🎚️ modal inputs: {count}")
-    if count == 0:
-        start_btn = modal.locator("#start-survey-button")
-        if await start_btn.count() > 0:
-            try:
-                await start_btn.first.evaluate("el => el.click()")
-            except Exception:
-                try:
-                    await page.evaluate(
-                        "() => { const el = document.getElementById('start-survey-button'); if (el) el.click(); }"
-                    )
-                except Exception:
-                    await page.evaluate(
-                        "() => { if (typeof openSurvey === 'function') openSurvey(); }"
-                    )
-            await asyncio.sleep(2)
-            try:
-                src = await page.locator("iframe#frameurl").get_attribute("src")
-                print(f"🧩 frameurl src after start: {src!r}")
-            except Exception:
-                pass
-            print("➡️ Start clicked")
-            return await _resolve_active_page(page)
-        raise RuntimeError("No selectable inputs found in survey modal")
-
-    target = radios.nth(min(option_index, count - 1))
-    await target.check(force=True)
-    await asyncio.sleep(0.5)
-
-    next_btn = modal.locator(
-        "button:has-text('Nächste'), button:has-text('Next'), button:has-text('Weiter')"
-    )
-    if await next_btn.count() > 0:
-        await next_btn.first.click(force=True)
-        await asyncio.sleep(2)
-        print("➡️ Next clicked")
-    else:
-        print("⚠️ Kein Next-Button gefunden")
-    return await _resolve_active_page(page)
+    return await radio_question_run(page, option_index)
 
 
 async def _wait_for_question_state(page, timeout_seconds: int = 10) -> bool:
@@ -474,6 +430,11 @@ async def _run_survey_loop(timeout_seconds: int, index: int, max_steps: int) -> 
         page = await _click_card(page, index)
         if page.is_closed() and context.pages:
             page = context.pages[-1]
+        page = await _resolve_active_page(page)
+        try:
+            page = await consent_modal_run(page)
+        except Exception as consent_error:
+            print(f"⚠️ Consent handling skipped/failed: {consent_error}")
 
         for step in range(max_steps):
             await asyncio.sleep(1.5)
@@ -481,6 +442,10 @@ async def _run_survey_loop(timeout_seconds: int, index: int, max_steps: int) -> 
             if not await modal.is_visible():
                 print(f"✅ Survey modal closed after {step} steps")
                 await _wait_for_question_state(page, timeout_seconds=10)
+                try:
+                    page = await consent_modal_run(page)
+                except Exception as consent_error:
+                    print(f"⚠️ Consent re-check skipped/failed: {consent_error}")
                 try:
                     body = await page.locator("body").inner_text(timeout=3000)
                     print(f"🧾 Post-start body: {body[:800]!r}")
