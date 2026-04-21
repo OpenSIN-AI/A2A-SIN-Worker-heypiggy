@@ -57,6 +57,23 @@ def _parser() -> argparse.ArgumentParser:
     )
     click_cmd.add_argument("--index", type=int, default=0, help="Survey card index after scoring")
 
+    inspect_cmd = sub.add_parser(
+        "inspect-survey", help="Open one survey and print modal/question details"
+    )
+    inspect_cmd.add_argument(
+        "--timeout-seconds", type=int, default=300, help="How long to wait for manual login"
+    )
+    inspect_cmd.add_argument("--index", type=int, default=0, help="Survey card index after scoring")
+
+    answer_cmd = sub.add_parser(
+        "answer-survey", help="Pick one answer in the survey modal and continue"
+    )
+    answer_cmd.add_argument(
+        "--timeout-seconds", type=int, default=300, help="How long to wait for manual login"
+    )
+    answer_cmd.add_argument("--index", type=int, default=0, help="Survey card index after scoring")
+    answer_cmd.add_argument("--option-index", type=int, default=0, help="Answer option index")
+
     return parser
 
 
@@ -177,6 +194,61 @@ async def _click_card(page, index: int) -> None:
         print(f"📄 URL nach clickSurvey: {page.url}")
 
 
+async def _inspect_survey(page) -> None:
+    """Dump the visible survey modal so we can wire the next CLI step."""
+    modal = page.locator("#survey-modal")
+    try:
+        visible = await modal.is_visible()
+        print(f"🪟 survey-modal visible: {visible}")
+        if visible:
+            print(f"🧾 survey-modal text: {(await modal.inner_text(timeout=3000))[:600]!r}")
+            controls = modal.locator("button, input, label, [role='button']")
+            count = await controls.count()
+            print(f"🎛️ survey-modal controls: {count}")
+            for i in range(min(count, 24)):
+                ctl = controls.nth(i)
+                try:
+                    txt = (await ctl.inner_text(timeout=1200)).strip()
+                except Exception:
+                    txt = ""
+                try:
+                    val = await ctl.get_attribute("value") or ""
+                except Exception:
+                    val = ""
+                print(f"   • control[{i}]: {txt[:120]!r} value={val!r}")
+    except Exception as inspect_error:
+        print(f"⚠️ Survey modal inspect failed: {inspect_error}")
+
+
+async def _answer_survey(page, option_index: int) -> None:
+    """Choose one modal option and advance one step."""
+    modal = page.locator("#survey-modal")
+    visible = await modal.is_visible()
+    print(f"🪟 survey-modal visible: {visible}")
+    if not visible:
+        raise RuntimeError("survey-modal not visible")
+
+    radios = modal.locator("input[type='radio'], input[type='checkbox']")
+    count = await radios.count()
+    print(f"🎚️ modal inputs: {count}")
+    if count == 0:
+        raise RuntimeError("No selectable inputs found in survey modal")
+
+    target = radios.nth(min(option_index, count - 1))
+    await target.check(force=True)
+    await asyncio.sleep(0.5)
+
+    next_btn = modal.locator(
+        "button:has-text('Nächste'), button:has-text('Next'), button:has-text('Weiter')"
+    )
+    if await next_btn.count() > 0:
+        await next_btn.first.click(force=True)
+        await asyncio.sleep(2)
+        print("➡️ Next clicked")
+    else:
+        print("⚠️ Kein Next-Button gefunden")
+
+
 async def _run_open_list(timeout_seconds: int) -> int:
     playwright, context, page = await _open_browser()
     try:
@@ -220,6 +292,58 @@ async def _run_click_survey(timeout_seconds: int, index: int) -> int:
             pass
 
 
+async def _run_inspect_survey(timeout_seconds: int, index: int) -> int:
+    playwright, context, page = await _open_browser()
+    try:
+        if await _wait_for_list(page, timeout_seconds):
+            print("✅ Login erkannt")
+        if page.is_closed() and context.pages:
+            page = context.pages[0]
+        await asyncio.sleep(1)
+        await _print_cards(page, context)
+        await _click_card(page, index)
+        if page.is_closed() and context.pages:
+            page = context.pages[-1]
+        await asyncio.sleep(2)
+        await _inspect_survey(page)
+        return 0
+    finally:
+        try:
+            await context.close()
+        except Exception:
+            pass
+        try:
+            await playwright.stop()
+        except Exception:
+            pass
+
+
+async def _run_answer_survey(timeout_seconds: int, index: int, option_index: int) -> int:
+    playwright, context, page = await _open_browser()
+    try:
+        if await _wait_for_list(page, timeout_seconds):
+            print("✅ Login erkannt")
+        if page.is_closed() and context.pages:
+            page = context.pages[0]
+        await asyncio.sleep(1)
+        await _print_cards(page, context)
+        await _click_card(page, index)
+        if page.is_closed() and context.pages:
+            page = context.pages[-1]
+        await asyncio.sleep(2)
+        await _answer_survey(page, option_index)
+        return 0
+    finally:
+        try:
+            await context.close()
+        except Exception:
+            pass
+        try:
+            await playwright.stop()
+        except Exception:
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -228,6 +352,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return asyncio.run(_run_open_list(args.timeout_seconds))
     if args.command == "click-survey":
         return asyncio.run(_run_click_survey(args.timeout_seconds, args.index))
+    if args.command == "inspect-survey":
+        return asyncio.run(_run_inspect_survey(args.timeout_seconds, args.index))
+    if args.command == "answer-survey":
+        return asyncio.run(_run_answer_survey(args.timeout_seconds, args.index, args.option_index))
 
     parser.error(f"unknown command: {args.command}")
     return 2
