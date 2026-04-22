@@ -516,6 +516,7 @@ class PlaywrightDriver(BrowserDriver):
             args=[
                 f"--window-size={viewport_width},{viewport_height}",
                 f"--window-position={self._window_position_x},{self._window_position_y}",
+                "--hide-crash-restore-bubble",
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
