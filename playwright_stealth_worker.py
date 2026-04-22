@@ -606,6 +606,19 @@ async def main():
                                 print(f"📄 URL nach Survey-Start: {page.url}")
                             except Exception as open_click_error:
                                 print(f"⚠️ Survey-Start Klick fehlgeschlagen: {open_click_error}")
+                        try:
+                            modal_start = page.locator("#start-survey-button")
+                            if await modal_start.count():
+                                await modal_start.first.evaluate("el => el.click()")
+                                await asyncio.sleep(3)
+                                try:
+                                    body_text = await page.locator("body").inner_text(timeout=3000)
+                                    print(f"🧾 Nach-Modal-Start Body: {body_text[:300]!r}")
+                                except Exception:
+                                    pass
+                                print(f"📄 URL nach Modal-Start: {page.url}")
+                        except Exception as modal_error:
+                            print(f"⚠️ Modal-Start Klick fehlgeschlagen: {modal_error}")
                     print(f"📄 URL nach Umfrage-Klick: {page.url}")
                     print(f"🧷 Klick-Status: {'ok' if clicked else 'failed'}")
                     if context is not None:

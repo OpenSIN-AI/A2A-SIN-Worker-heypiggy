@@ -174,6 +174,20 @@ async def _click_card(page, index: int) -> None:
             print(f"🪟 Overlays/Iframes: {overlays}")
         except Exception as overlay_error:
             print(f"⚠️ Overlay-Scan fehlgeschlagen: {overlay_error}")
+        try:
+            modal_start = page.locator("#start-survey-button")
+            if await modal_start.count():
+                await modal_start.first.evaluate("el => el.click()")
+                await asyncio.sleep(3)
+                page_urls = [pg.url for pg in page.context.pages]
+                print(f"🪟 Pages nach Start-Click: {page_urls}")
+                try:
+                    body_text = await page.locator("body").inner_text(timeout=3000)
+                    print(f"🧾 Body nach Start-Click: {body_text[:300]!r}")
+                except Exception as body_error:
+                    print(f"⚠️ Body nach Start-Click nicht lesbar: {body_error}")
+        except Exception as modal_error:
+            print(f"⚠️ survey modal start fehlgeschlagen: {modal_error}")
         print(f"📄 URL nach clickSurvey: {page.url}")
 
 
