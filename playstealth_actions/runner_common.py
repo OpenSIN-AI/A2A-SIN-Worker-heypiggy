@@ -13,6 +13,7 @@ from playstealth_actions.inspect_modal import run as inspect_modal
 from playstealth_actions.list_cards import print_cards
 from playstealth_actions.page_utils import resolve_active_page
 from playstealth_actions.question_router import run as question_router
+from playstealth_actions.state_store import save_state
 from playstealth_actions.survey_state import create_state
 from playstealth_actions.wait_question import run as wait_question
 
@@ -121,10 +122,12 @@ async def run_survey_flow(timeout_seconds: int, index: int, max_steps: int) -> i
         state.current_url = page.url
         state.tab_count = len(page.context.pages)
         state.record("survey opened")
+        save_state(state)
         page = await resolve_active_page(page)
         try:
             page = await consent_modal(page)
             state.record("consent handled")
+            save_state(state)
         except Exception as consent_error:
             print(f"⚠️ Consent handling skipped/failed: {consent_error}")
 
@@ -140,13 +143,16 @@ async def run_survey_flow(timeout_seconds: int, index: int, max_steps: int) -> i
                 break
             print(f"🔁 Survey step {step + 1}/{max_steps}")
             state.record(f"step_{step + 1}")
+            save_state(state)
             await inspect_modal(page)
             page = await question_router(page, 0)
             state.current_url = page.url
             state.tab_count = len(page.context.pages)
             print(f"🧭 State snapshot: {state.snapshot()}")
+            save_state(state)
         return 0
     finally:
         print(f"🧭 Final state: {state.snapshot()}")
+        save_state(state)
         await context.close()
         await playwright.stop()
