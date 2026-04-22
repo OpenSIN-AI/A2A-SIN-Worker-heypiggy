@@ -32,6 +32,9 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec("run-survey", "playstealth_actions.run_survey", "Run a short survey loop"),
     ToolSpec(
+        "resume-survey", "playstealth_actions.resume_survey", "Resume from the last saved state"
+    ),
+    ToolSpec(
         "consent-modal", "playstealth_actions.consent_modal", "Accept post-open consent modals"
     ),
     ToolSpec(
@@ -54,46 +57,46 @@ TOOLS: list[ToolSpec] = [
         "select-question",
         "playstealth_actions.select_question",
         "Handle select/dropdown questions",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
         "text-question",
         "playstealth_actions.text_question",
         "Handle short text input questions",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
         "textarea-question",
         "playstealth_actions.textarea_question",
         "Handle long free-text questions",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
         "matrix-question",
         "playstealth_actions.matrix_question",
         "Handle matrix/grid questions",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
         "slider-question",
         "playstealth_actions.slider_question",
         "Handle slider questions",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
-        "date-question", "playstealth_actions.date_question", "Handle date questions", "planned"
+        "date-question", "playstealth_actions.date_question", "Handle date questions", "implemented"
     ),
     ToolSpec(
         "rank-order-question",
         "playstealth_actions.rank_order_question",
         "Handle rank-order questions",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
         "number-question",
         "playstealth_actions.number_question",
         "Handle numeric input questions",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
         "detect-question-type",

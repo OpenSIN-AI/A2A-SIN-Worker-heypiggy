@@ -1,7 +1,7 @@
 """Survey question router for PlayStealth.
 
-The first production-safe version handles the common layouts we already saw:
-radio, checkbox, select, textarea/text, and the consent/start button.
+This router inspects the visible modal and dispatches to one of the tiny
+question modules. That keeps the CLI thin while preserving per-tool files.
 """
 
 from __future__ import annotations
@@ -9,6 +9,16 @@ from __future__ import annotations
 import asyncio
 
 from playstealth_actions.page_utils import resolve_active_page
+from playstealth_actions import (
+    date_question,
+    matrix_question,
+    number_question,
+    rank_order_question,
+    select_question,
+    slider_question,
+    text_question,
+    textarea_question,
+)
 
 
 async def _click_visible_start(page, modal):
@@ -48,6 +58,25 @@ async def run(page, option_index: int):
     print(f"🪟 survey-modal visible: {visible}")
     if not visible:
         raise RuntimeError("survey-modal not visible")
+
+    # Inspect the visible inputs once and dispatch by what is actually on screen.
+    if await modal.locator("input[type='range']").count() > 0:
+        return await slider_question.run(page)
+    if await modal.locator("input[type='date']").count() > 0:
+        return await date_question.run(page)
+    if await modal.locator("input[type='number'], input[inputmode='numeric']").count() > 0:
+        return await number_question.run(page)
+    if await modal.locator("select").count() > 0:
+        return await select_question.run(page, option_index)
+    if await modal.locator("textarea").count() > 0:
+        return await textarea_question.run(page, "Keine Angabe")
+    if await modal.locator("input[type='text']").count() > 0:
+        return await text_question.run(page, "Keine Angabe")
+
+    if await modal.locator("table, .matrix, .grid, [data-question-type='matrix']").count() > 0:
+        return await matrix_question.run(page, option_index)
+    if await modal.locator(".rank-order, [data-question-type='rank-order']").count() > 0:
+        return await rank_order_question.run(page)
 
     # Radios/checkboxes are the most common layout, so we handle them first.
     inputs = modal.locator("input[type='radio'], input[type='checkbox']")

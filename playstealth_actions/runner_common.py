@@ -14,6 +14,7 @@ from playstealth_actions.list_cards import print_cards
 from playstealth_actions.page_utils import resolve_active_page
 from playstealth_actions.question_router import run as question_router
 from playstealth_actions.state_store import save_state
+from playstealth_actions.state_store import load_state
 from playstealth_actions.survey_state import create_state
 from playstealth_actions.wait_question import run as wait_question
 
@@ -156,3 +157,11 @@ async def run_survey_flow(timeout_seconds: int, index: int, max_steps: int) -> i
         save_state(state)
         await context.close()
         await playwright.stop()
+
+
+async def resume_last_flow(timeout_seconds: int, max_steps: int) -> int:
+    """Resume the last saved survey index from the state store."""
+    saved = load_state() or {}
+    index = int(saved.get("survey_index", 0) or 0)
+    print(f"♻️ Resuming from saved survey index: {index}")
+    return await run_survey_flow(timeout_seconds, index, max_steps)
