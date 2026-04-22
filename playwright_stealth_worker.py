@@ -24,6 +24,7 @@ Usage:
 import asyncio
 import os
 import random
+import re
 import shutil
 import sys
 import time
@@ -205,6 +206,152 @@ async def _score_open_survey_candidate(candidate) -> tuple[int, dict[str, str]]:
         if token in haystack:
             score += weight
     return score, {"text": text, "href": href}
+
+
+def _is_consent_prompt_text(body_text: str, url: str = "") -> bool:
+    """Erkennt die typischen Consent-/Another-survey-open-Screens.
+
+    Diese Screens öffnen sich häufig als eigene Tabs und blockieren den
+    eigentlichen Survey-Flow, bis eine Auswahl getroffen wurde.
+    """
+    haystack = f"{body_text} {url}".lower()
+    return any(
+        token in haystack
+        for token in (
+            "already another survey open",
+            "i want to complete this survey",
+            "i want to continue with the other survey",
+            "datenschutzerklärung",
+            "zustimmen und fortfahren",
+            "annehmen und beginnen",
+            "consent",
+        )
+    )
+
+
+async def _visible_input_count(page) -> int:
+    return await page.evaluate(
+        """
+        () => Array.from(document.querySelectorAll('input[type="checkbox"], input[type="radio"]'))
+          .filter(el => {
+            const r = el.getBoundingClientRect();
+            return !!(r.width || r.height || el.getClientRects().length);
+          }).length
+        """
+    )
+
+
+async def _page_body_text(page, timeout: int = 3000) -> str:
+    try:
+        return await page.locator("body").inner_text(timeout=timeout)
+    except Exception:
+        return ""
+
+
+async def _click_text_or_role(page, label: str, role: str | None = None) -> bool:
+    locators = []
+    if role is not None:
+        try:
+            locators.append(page.get_by_role(role, name=re.compile(re.escape(label), re.I)))
+        except Exception:
+            pass
+    locators.append(page.get_by_text(label, exact=True))
+
+    for locator in locators:
+        try:
+            if await locator.count():
+                target = locator.first
+                try:
+                    await target.click(force=True, timeout=4000)
+                except Exception:
+                    try:
+                        await target.evaluate(
+                            "el => (el.closest('button,label,[role=button]') || el).click()"
+                        )
+                    except Exception:
+                        await target.dispatch_event("click")
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def _click_visible_checkbox(page) -> bool:
+    checkboxes = page.locator('input[type="checkbox"]')
+    for index in range(await checkboxes.count()):
+        checkbox = checkboxes.nth(index)
+        try:
+            if not await checkbox.is_visible():
+                continue
+            await checkbox.click(force=True, timeout=4000)
+            return True
+        except Exception:
+            try:
+                await checkbox.evaluate("el => el.click()")
+                return True
+            except Exception:
+                continue
+    return False
+
+
+async def _handle_consent_prompt(page) -> bool:
+    """Bearbeitet die häufigsten Survey-Consent-Screens automatisch."""
+    body_text = await _page_body_text(page)
+    lowered = body_text.lower()
+
+    if not _is_consent_prompt_text(body_text, page.url):
+        return False
+
+    handled = False
+
+    if "already another survey open" in lowered:
+        handled |= await _click_text_or_role(page, "I want to complete this survey", role="radio")
+        if not handled:
+            handled |= await _click_text_or_role(
+                page, "I want to continue with the other survey", role="radio"
+            )
+        handled |= await _click_text_or_role(page, "Continue", role="button")
+
+    if (
+        "datenschutzerklärung" in lowered
+        or "zustimmen und fortfahren" in lowered
+        or "annehmen und beginnen" in lowered
+    ):
+        handled |= await _click_visible_checkbox(page)
+        handled |= await _click_text_or_role(page, "Zustimmen und fortfahren", role="button")
+        handled |= await _click_text_or_role(page, "Annehmen und beginnen", role="button")
+        handled |= await _click_text_or_role(page, "Continue", role="button")
+
+    if "consent" in lowered and not handled:
+        handled |= await _click_text_or_role(page, "Continue", role="button")
+
+    return handled
+
+
+async def _select_active_page(context, fallback_page):
+    """Wählt den aktivsten Tab aus einem Multi-Tab-Survey-Flow."""
+    best_page = fallback_page
+    best_score = -10_000
+    for candidate in context.pages:
+        if candidate.is_closed():
+            continue
+        try:
+            score = await _visible_input_count(candidate) * 10
+            body_text = await _page_body_text(candidate, timeout=1500)
+            lowered = body_text.lower()
+            url = candidate.url.lower()
+            if "ipsosinteractive.com" in url or "samplicio.us" in url:
+                score += 20
+            if _is_consent_prompt_text(body_text, url):
+                score += 25
+            if "deine verfügbaren quellen" in lowered or "survey list" in lowered:
+                score -= 5
+        except Exception:
+            continue
+        if score > best_score:
+            best_score = score
+            best_page = candidate
+    return best_page
 
 
 async def main():
@@ -417,9 +564,14 @@ async def main():
                             print(f"⚠️ JS-click fehlgeschlagen: {js_click_error}")
 
                     await asyncio.sleep(3)
-                    if context is not None and len(context.pages) > 1:
-                        page = context.pages[-1]
-                        print(f"🪟 Neuer Tab erkannt: {page.url}")
+                    if context is not None and context.pages:
+                        selected_page = await _select_active_page(context, page)
+                        if selected_page is not page:
+                            page = selected_page
+                            print(f"🪟 Aktiver Tab erkannt: {page.url}")
+                        elif len(context.pages) > 1:
+                            print(f"🪟 Mehrere Tabs offen, bleibe bei: {page.url}")
+                    body_text = ""
                     try:
                         body_text = await page.locator("body").inner_text(timeout=3000)
                         print(f"🧾 Body-Snippet: {body_text[:300]!r}")
@@ -525,6 +677,26 @@ async def main():
                                         print(f"🧾 Popup-Body: {popup_text[:300]!r}")
                                     except Exception as popup_error:
                                         print(f"⚠️ Popup-Body nicht lesbar: {popup_error}")
+                                if context is not None and context.pages:
+                                    try:
+                                        selected_page = await _select_active_page(context, page)
+                                        if selected_page is not page:
+                                            page = selected_page
+                                            print(f"🪟 Aktiver Survey-Tab gewählt: {page.url}")
+                                        handled_consent = await _handle_consent_prompt(page)
+                                        if handled_consent:
+                                            print("✅ Consent-Dialog bearbeitet")
+                                            await asyncio.sleep(2)
+                                            selected_page = await _select_active_page(context, page)
+                                            if selected_page is not page:
+                                                page = selected_page
+                                                print(
+                                                    f"🪟 Nach Consent aktiver Survey-Tab: {page.url}"
+                                                )
+                                    except Exception as consent_error:
+                                        print(
+                                            f"⚠️ Consent-/Tab-Handling fehlgeschlagen: {consent_error}"
+                                        )
                                 print(f"📄 URL nach Card-Click: {page.url}")
                             except Exception as card_click_error:
                                 print(f"⚠️ Card-Click fehlgeschlagen: {card_click_error}")
@@ -616,6 +788,26 @@ async def main():
                                     print(f"🧾 Nach-Modal-Start Body: {body_text[:300]!r}")
                                 except Exception:
                                     pass
+                                if context is not None and context.pages:
+                                    try:
+                                        selected_page = await _select_active_page(context, page)
+                                        if selected_page is not page:
+                                            page = selected_page
+                                            print(f"🪟 Aktiver Tab nach Modal-Start: {page.url}")
+                                        handled_consent = await _handle_consent_prompt(page)
+                                        if handled_consent:
+                                            print("✅ Consent-Dialog nach Modal-Start bearbeitet")
+                                            await asyncio.sleep(2)
+                                            selected_page = await _select_active_page(context, page)
+                                            if selected_page is not page:
+                                                page = selected_page
+                                                print(
+                                                    f"🪟 Nach Modal-Consent aktiver Tab: {page.url}"
+                                                )
+                                    except Exception as consent_error:
+                                        print(
+                                            f"⚠️ Consent-/Tab-Handling nach Modal-Start fehlgeschlagen: {consent_error}"
+                                        )
                                 print(f"📄 URL nach Modal-Start: {page.url}")
                         except Exception as modal_error:
                             print(f"⚠️ Modal-Start Klick fehlgeschlagen: {modal_error}")

@@ -29,7 +29,9 @@ from playwright.async_api import async_playwright
 from playwright_stealth.stealth import Stealth
 
 from playwright_stealth_worker import (
+    _handle_consent_prompt,
     _score_open_survey_candidate,
+    _select_active_page,
     detect_chrome_profile_dir,
     prepare_playwright_user_data_dir,
     wait_for_manual_login,
@@ -156,6 +158,21 @@ async def _click_card(page, index: int) -> None:
         result = await page.evaluate("sid => clickSurvey(sid)", sid)
         print(f"🧠 clickSurvey result: {result!r}")
         await asyncio.sleep(3)
+        try:
+            selected_page = await _select_active_page(page.context, page)
+            if selected_page is not page:
+                page = selected_page
+                print(f"🪟 Aktiver Tab gewählt: {page.url}")
+            handled_consent = await _handle_consent_prompt(page)
+            if handled_consent:
+                print("✅ Consent-Dialog bearbeitet")
+                await asyncio.sleep(2)
+                selected_page = await _select_active_page(page.context, page)
+                if selected_page is not page:
+                    page = selected_page
+                    print(f"🪟 Nach Consent aktiver Tab: {page.url}")
+        except Exception as consent_error:
+            print(f"⚠️ Consent-/Tab-Handling fehlgeschlagen: {consent_error}")
         page_urls = [pg.url for pg in page.context.pages]
         print(f"🪟 Pages nach clickSurvey: {page_urls}")
         try:
@@ -179,6 +196,23 @@ async def _click_card(page, index: int) -> None:
             if await modal_start.count():
                 await modal_start.first.evaluate("el => el.click()")
                 await asyncio.sleep(3)
+                try:
+                    selected_page = await _select_active_page(page.context, page)
+                    if selected_page is not page:
+                        page = selected_page
+                        print(f"🪟 Aktiver Tab nach Start-Click: {page.url}")
+                    handled_consent = await _handle_consent_prompt(page)
+                    if handled_consent:
+                        print("✅ Consent-Dialog nach Start-Click bearbeitet")
+                        await asyncio.sleep(2)
+                        selected_page = await _select_active_page(page.context, page)
+                        if selected_page is not page:
+                            page = selected_page
+                            print(f"🪟 Nach Start-Consent aktiver Tab: {page.url}")
+                except Exception as consent_error:
+                    print(
+                        f"⚠️ Consent-/Tab-Handling nach Start-Click fehlgeschlagen: {consent_error}"
+                    )
                 page_urls = [pg.url for pg in page.context.pages]
                 print(f"🪟 Pages nach Start-Click: {page_urls}")
                 try:
