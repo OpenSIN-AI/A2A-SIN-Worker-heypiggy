@@ -46,6 +46,17 @@ from typing import Any
 DriverResult = dict[str, Any]
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read int env vars safely without breaking worker startup."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 class DriverType(Enum):
     """Supported browser automation backends."""
 
@@ -411,6 +422,18 @@ class PlaywrightDriver(BrowserDriver):
         self._browser = None
         self._context = None
         self._page = None
+        self._window_width = int(
+            self._config.get("width", _env_int("HEYPIGGY_WINDOW_WIDTH", 1024))
+        )
+        self._window_height = int(
+            self._config.get("height", _env_int("HEYPIGGY_WINDOW_HEIGHT", 768))
+        )
+        self._window_position_x = int(
+            self._config.get("window_x", _env_int("HEYPIGGY_WINDOW_X", 40))
+        )
+        self._window_position_y = int(
+            self._config.get("window_y", _env_int("HEYPIGGY_WINDOW_Y", 40))
+        )
         self._profile_root = Path(
             self._config.get(
                 "profile_root",
@@ -463,8 +486,8 @@ class PlaywrightDriver(BrowserDriver):
 
         # Persistenter Context: login cookies/storage bleiben im Clone erhalten.
         # Das ist der Unterschied zwischen "jedes Mal neu einloggen" und "einmal loggen, dann weiterlaufen".
-        viewport_width = self._config.get("width", 1920)
-        viewport_height = self._config.get("height", 1080)
+        viewport_width = self._window_width
+        viewport_height = self._window_height
 
         context_options = {
             "viewport": {"width": viewport_width, "height": viewport_height},
@@ -492,6 +515,7 @@ class PlaywrightDriver(BrowserDriver):
             headless=self._config.get("headless", False),
             args=[
                 f"--window-size={viewport_width},{viewport_height}",
+                f"--window-position={self._window_position_x},{self._window_position_y}",
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
@@ -572,7 +596,7 @@ class PlaywrightDriver(BrowserDriver):
         """Screenshot mit Playwright."""
         if not self._page:
             raise RuntimeError("Driver not initialized")
-        img = await self._page.screenshot(format="jpeg", quality=85)
+        img = await self._page.screenshot(type="jpeg", quality=85)
         import base64
 
         data_url = f"data:image/jpeg;base64,{base64.b64encode(img).decode()}"

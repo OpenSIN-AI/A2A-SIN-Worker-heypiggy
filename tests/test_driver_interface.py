@@ -6,6 +6,8 @@
 
 """Tests for driver_interface.py"""
 
+import asyncio
+
 import pytest
 
 from driver_interface import (
@@ -97,6 +99,54 @@ class TestBrowserDriver:
         driver = PlaywrightDriver(config)
         assert driver._config["headless"] is False
         assert driver._config["width"] == 1280
+        assert driver._window_width == 1280
+
+    def test_playwright_driver_defaults_to_compact_window(self, monkeypatch):
+        monkeypatch.delenv("HEYPIGGY_WINDOW_WIDTH", raising=False)
+        monkeypatch.delenv("HEYPIGGY_WINDOW_HEIGHT", raising=False)
+        monkeypatch.delenv("HEYPIGGY_WINDOW_X", raising=False)
+        monkeypatch.delenv("HEYPIGGY_WINDOW_Y", raising=False)
+
+        driver = PlaywrightDriver()
+
+        assert driver._window_width == 1024
+        assert driver._window_height == 768
+        assert driver._window_position_x == 40
+        assert driver._window_position_y == 40
+
+    def test_playwright_driver_reads_window_env_overrides(self, monkeypatch):
+        monkeypatch.setenv("HEYPIGGY_WINDOW_WIDTH", "900")
+        monkeypatch.setenv("HEYPIGGY_WINDOW_HEIGHT", "700")
+        monkeypatch.setenv("HEYPIGGY_WINDOW_X", "12")
+        monkeypatch.setenv("HEYPIGGY_WINDOW_Y", "18")
+
+        driver = PlaywrightDriver()
+
+        assert driver._window_width == 900
+        assert driver._window_height == 700
+        assert driver._window_position_x == 12
+        assert driver._window_position_y == 18
+
+    def test_playwright_screenshot_uses_playwright_jpeg_type(self):
+        class FakePage:
+            viewport_size = {"width": 1234, "height": 567}
+
+            def __init__(self):
+                self.calls = []
+
+            async def screenshot(self, **kwargs):
+                self.calls.append(kwargs)
+                assert kwargs == {"type": "jpeg", "quality": 85}
+                return b"fake-image-bytes"
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._page = FakePage()
+
+        result = asyncio.run(driver.screenshot())
+
+        assert result.data_url.startswith("data:image/jpeg;base64,")
+        assert result.width == 1234
+        assert result.height == 567
 
 
 class TestCreateDriver:
