@@ -31,6 +31,7 @@ from playstealth_actions.open_list import run as open_list_run
 from playstealth_actions.state_store import load_state, state_path
 from playstealth_actions.tool_registry import list_tools
 from playstealth_actions.tool_manifest import format_manifest
+from playstealth_actions.diagnostic_runner import run as diagnostic_run
 from playstealth_actions.resume_survey import run as resume_survey_run
 from playstealth_actions.run_survey import run as run_survey_run
 
@@ -94,6 +95,12 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("manifest", help="Print the PlayStealth tool manifest")
     sub.add_parser("state", help="Print the persisted PlayStealth state")
 
+    diag_cmd = sub.add_parser("diagnose", help="Run a diagnostics tool against the browser")
+    diag_cmd.add_argument("tool", help="Tool name from the registry")
+    diag_cmd.add_argument(
+        "--timeout-seconds", type=int, default=300, help="How long to wait for manual login"
+    )
+
     return parser
 
 
@@ -124,6 +131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"state_path: {state_path()}")
         print(load_state())
         return 0
+    if args.command == "diagnose":
+        return asyncio.run(diagnostic_run(args.tool, args.timeout_seconds))
 
     parser.error(f"unknown command: {args.command}")
     return 2

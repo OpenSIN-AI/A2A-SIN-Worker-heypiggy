@@ -34,6 +34,7 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         "resume-survey", "playstealth_actions.resume_survey", "Resume from the last saved state"
     ),
+    ToolSpec("diagnose", "playstealth_actions.diagnostic_runner", "Run a browser diagnostics tool"),
     ToolSpec(
         "consent-modal", "playstealth_actions.consent_modal", "Accept post-open consent modals"
     ),
@@ -102,43 +103,51 @@ TOOLS: list[ToolSpec] = [
         "detect-question-type",
         "playstealth_actions.detect_question_type",
         "Detect the current question type",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
-        "detect-popup", "playstealth_actions.detect_popup", "Detect popups and overlays", "planned"
+        "detect-popup",
+        "playstealth_actions.detect_popup",
+        "Detect popups and overlays",
+        "implemented",
     ),
     ToolSpec(
         "detect-new-tab",
         "playstealth_actions.detect_new_tab",
         "Detect when a survey opens a new tab",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
         "detect-iframe",
         "playstealth_actions.detect_iframe",
         "Detect iframe-based survey embeds",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
         "detect-spinner",
         "playstealth_actions.detect_spinner",
         "Detect loading spinners / stalls",
-        "planned",
+        "implemented",
     ),
     ToolSpec(
-        "detect-consent", "playstealth_actions.detect_consent", "Detect consent dialogs", "planned"
+        "detect-consent",
+        "playstealth_actions.detect_consent",
+        "Detect consent dialogs",
+        "implemented",
     ),
     ToolSpec(
-        "inspect-page", "playstealth_actions.inspect_page", "Inspect the active page", "planned"
+        "inspect-page", "playstealth_actions.inspect_page", "Inspect the active page", "implemented"
     ),
-    ToolSpec("inspect-tabs", "playstealth_actions.inspect_tabs", "Inspect browser tabs", "planned"),
+    ToolSpec(
+        "inspect-tabs", "playstealth_actions.inspect_tabs", "Inspect browser tabs", "implemented"
+    ),
     ToolSpec(
         "inspect-controls",
         "playstealth_actions.inspect_controls",
         "Inspect visible controls",
-        "planned",
+        "implemented",
     ),
-    ToolSpec("dump-state", "playstealth_actions.dump_state", "Dump session state", "planned"),
+    ToolSpec("dump-state", "playstealth_actions.dump_state", "Dump session state", "implemented"),
 ]
 
 

@@ -9,6 +9,7 @@ Generated from `playstealth_actions/tool_manifest.py`.
 - answer-survey
 - run-survey
 - resume-survey
+- diagnose
 - consent-modal
 - page-follow
 - state-track
