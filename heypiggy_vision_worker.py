@@ -1516,13 +1516,24 @@ _VISION_JSON_OPTIONAL_KEYS = (
     "question_topic",
     "trap_detected",
 )
+_VISION_JSON_ACTION_KEYS = (
+    "ref",
+    "selector",
+    "description",
+    "keys",
+    "x",
+    "y",
+    "url",
+    "action",
+)
 
 
 def _vision_json_score(candidate: dict[str, object]) -> int:
     """Bewertet, wie stark ein Dict nach einer Vision-Entscheidung aussieht."""
     required = sum(1 for key in _VISION_JSON_REQUIRED_KEYS if key in candidate)
     optional = sum(1 for key in _VISION_JSON_OPTIONAL_KEYS if key in candidate)
-    return required * 10 + optional
+    action = sum(1 for key in _VISION_JSON_ACTION_KEYS if key in candidate)
+    return required * 10 + optional + action * 3
 
 
 def _extract_vision_json(text: str) -> dict[str, object] | None:
@@ -1577,6 +1588,73 @@ def _extract_vision_json(text: str) -> dict[str, object] | None:
             best_end = absolute_end
 
     return best_candidate
+
+
+def _normalize_vision_decision(decision: dict[str, object], action_desc: str) -> dict[str, object]:
+    """Ergänzt verkürzte Vision-Antworten zu einem vollständigen Entscheidungsobjekt."""
+    if not isinstance(decision, dict):
+        return {"verdict": "RETRY", "page_state": "unknown", "next_action": "none", "progress": False}
+
+    normalized = dict(decision)
+    next_action = str(normalized.get("next_action", "")).strip()
+    raw_params = normalized.get("next_params", {})
+    next_params = raw_params if isinstance(raw_params, dict) else {}
+
+    inferred_action = ""
+    inferred_params: dict[str, object] = {}
+
+    ref = str(normalized.get("ref", "")).strip()
+    selector = str(normalized.get("selector", "")).strip()
+    description = str(normalized.get("description", "")).strip()
+    url = str(normalized.get("url", "")).strip()
+    action = str(normalized.get("action", "")).strip()
+
+    keys = normalized.get("keys")
+    x = normalized.get("x")
+    y = normalized.get("y")
+
+    if ref:
+        inferred_action = "click_ref"
+        inferred_params = {"ref": ref}
+    elif selector:
+        inferred_action = "click_element"
+        inferred_params = {"selector": selector}
+    elif description:
+        inferred_action = "vision_click"
+        inferred_params = {"description": description}
+    elif isinstance(x, (int, float)) and isinstance(y, (int, float)):
+        inferred_action = "click_coordinates"
+        inferred_params = {"x": x, "y": y}
+    elif isinstance(keys, list) and keys:
+        inferred_action = "keyboard"
+        inferred_params = {"keys": [str(key) for key in keys]}
+        if selector:
+            inferred_params["selector"] = selector
+    elif url:
+        inferred_action = "navigate"
+        inferred_params = {"url": url}
+    elif action in CLICK_ACTIONS:
+        inferred_action = action
+        inferred_params = next_params or inferred_params
+
+    if inferred_action:
+        normalized.setdefault("page_state", "unknown")
+        normalized.setdefault(
+            "reason",
+            f"Normalized partial vision output from {action_desc[:60]}",
+        )
+        normalized["verdict"] = "PROCEED"
+        normalized["next_action"] = inferred_action
+        normalized["next_params"] = inferred_params or next_params or {}
+        normalized["progress"] = True
+        return normalized
+
+    normalized.setdefault("verdict", "RETRY")
+    normalized.setdefault("page_state", "unknown")
+    normalized.setdefault("next_action", "none")
+    normalized.setdefault("next_params", {})
+    normalized.setdefault("progress", False)
+    return normalized
 
 
 def detect_vision_auth_failure(raw_text: str) -> str | None:
@@ -5371,6 +5449,7 @@ ANTWORT-FORMAT (NUR dieses JSON, NICHTS anderes):
         result = _extract_vision_json(full_text)
         if result is None:
             raise json.JSONDecodeError("No valid vision JSON object found", full_text, 0)
+        result = _normalize_vision_decision(result, action_desc)
         audit(
             "vision_check",
             step=step_num,

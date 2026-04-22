@@ -566,6 +566,30 @@ class HeyPiggyWorkerJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision["page_state"], "dashboard")
         self.assertEqual(decision["next_params"]["selector"], "#btn")
 
+    async def test_ask_vision_normalizes_partial_ref_only_output(self):
+        """Regression: Ref-only Antworten des Vision-Modells müssen klickbar bleiben."""
+        with (
+            patch.object(worker, "dom_prescan", AsyncMock(return_value="DOM")),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(
+                    return_value={
+                        "ok": True,
+                        "auth_failure": False,
+                        "text": '{"ref": "@e9"}',
+                    }
+                ),
+            ),
+        ):
+            decision = await worker.ask_vision("/tmp/ref.png", "click a survey card", "click survey", 1)
+
+        self.assertEqual(decision["verdict"], "PROCEED")
+        self.assertEqual(decision["page_state"], "unknown")
+        self.assertEqual(decision["next_action"], "click_ref")
+        self.assertEqual(decision["next_params"], {"ref": "@e9"})
+        self.assertTrue(decision["progress"])
+
     async def test_resolve_survey_selector_prefers_id_over_generic_survey_item(self):
         with (
             patch.object(worker, "OPENSIN_V2_ENABLED", True),
