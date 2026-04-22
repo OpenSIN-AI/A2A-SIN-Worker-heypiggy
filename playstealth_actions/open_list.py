@@ -4,6 +4,6 @@ from __future__ import annotations
 
 
 async def run(timeout_seconds: int) -> int:
-    from playstealth_cli import _run_open_list
+    from playstealth_actions.runner_common import open_list_flow
 
-    return await _run_open_list(timeout_seconds)
+    return await open_list_flow(timeout_seconds)

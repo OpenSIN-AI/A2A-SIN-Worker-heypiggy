@@ -4,6 +4,6 @@ from __future__ import annotations
 
 
 async def run(timeout_seconds: int, index: int, option_index: int) -> int:
-    from playstealth_cli import _run_answer_survey
+    from playstealth_actions.runner_common import answer_survey_flow
 
-    return await _run_answer_survey(timeout_seconds, index, option_index)
+    return await answer_survey_flow(timeout_seconds, index, option_index)
