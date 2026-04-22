@@ -374,6 +374,35 @@ class HeyPiggyWorkerClickPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(clicked)
         self.assertEqual(gate.failed_selectors, ["@e9"])
 
+    async def test_escalating_click_derives_dashboard_survey_selector_from_ref_only(self):
+        gate_checks = AsyncMock(
+            side_effect=[
+                {"verdict": "RETRY", "page_state": "dashboard"},
+                {"verdict": "PROCEED", "page_state": "survey"},
+            ]
+        )
+        execute_bridge = AsyncMock(return_value={"ok": True})
+        resolve_selector = AsyncMock(side_effect=["", "#survey-65467728"])
+
+        with (
+            patch.object(worker, "_tab_params", return_value={"tabId": 7}),
+            patch.object(worker, "execute_bridge", execute_bridge),
+            patch.object(worker, "resolve_survey_selector", resolve_selector),
+            patch.object(worker, "_vision_gate_inside_escalation", gate_checks),
+            patch.object(worker.page_state_machine, "current_value", return_value="dashboard"),
+            patch.object(worker, "_bridge_v2_enabled", return_value=False),
+        ):
+            clicked = await worker.escalating_click(ref="@e9", step_num=3)
+
+        self.assertTrue(clicked)
+        methods = [call.args[0] for call in execute_bridge.await_args_list]
+        self.assertIn("click_ref", methods)
+        self.assertIn("click_element", methods)
+        click_element_call = next(
+            call for call in execute_bridge.await_args_list if call.args[0] == "click_element"
+        )
+        self.assertEqual(click_element_call.args[1]["selector"], "#survey-65467728")
+
     async def test_click_visible_button_with_text_prefers_click_ref(self):
         async def fake_bridge(method, params):
             if method == "dom.queryAll":
@@ -589,6 +618,20 @@ class HeyPiggyWorkerJsonParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision["next_action"], "click_ref")
         self.assertEqual(decision["next_params"], {"ref": "@e9"})
         self.assertTrue(decision["progress"])
+
+    def test_needs_post_login_dashboard_bootstrap_for_cashout_page(self):
+        self.assertTrue(
+            worker._needs_post_login_dashboard_bootstrap(
+                "https://www.heypiggy.com/login?page=cashout"
+            )
+        )
+
+    def test_needs_post_login_dashboard_bootstrap_allows_dashboard_page(self):
+        self.assertFalse(
+            worker._needs_post_login_dashboard_bootstrap(
+                "https://www.heypiggy.com/?page=dashboard"
+            )
+        )
 
     async def test_resolve_survey_selector_prefers_id_over_generic_survey_item(self):
         with (

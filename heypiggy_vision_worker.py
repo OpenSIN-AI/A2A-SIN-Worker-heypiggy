@@ -5688,6 +5688,17 @@ async def escalating_click(
     selector = normalize_selector(selector)
     selector = await resolve_survey_selector(selector, description)
     selector, ref = _normalize_selector_and_ref(selector, ref)
+    if not selector and ref and page_state_machine.current_value() == "dashboard":
+        dashboard_selector = await resolve_survey_selector("div.survey-item", description)
+        dashboard_selector, _dashboard_ref = _normalize_selector_and_ref(dashboard_selector, "")
+        if dashboard_selector:
+            selector = dashboard_selector
+            audit(
+                "state_change",
+                message=(
+                    f"Dashboard-Ref ohne Selector auf Survey-Karte aufgelöst: {ref[:40]} -> {selector[:80]}"
+                ),
+            )
     if not selector and description:
         desc_lower = description.lower()
         if "umfrage" in desc_lower or "survey" in desc_lower or "€" in desc_lower:
@@ -6674,6 +6685,25 @@ def _resolve_terminal_exit_reason(exit_reason: str, gate) -> str:
     return "loop_finished"
 
 
+def _needs_post_login_dashboard_bootstrap(url: str) -> bool:
+    """Erkennt Login-Ziellandungen, die sofort aufs Dashboard umgebogen werden sollen."""
+    lowered = (url or "").lower()
+    if not lowered:
+        return True
+    if "accounts.google." in lowered:
+        return True
+    if "heypiggy.com" not in lowered:
+        return True
+    wrong_landing_markers = (
+        "page=cashout",
+        "cashout",
+        "giftcard",
+        "geschenkkarte",
+        "gift-card",
+    )
+    return any(marker in lowered for marker in wrong_landing_markers)
+
+
 def _should_generate_fail_replay(exit_reason: str) -> bool:
     return exit_reason not in {"vision_done", "loop_finished"}
 
@@ -7281,18 +7311,17 @@ async def main():
         stable_url = await _wait_for_url_stable(max_wait_sec=12.0)
         audit("post_login_url_stable", url=stable_url or "(unknown)")
 
-        _is_heypiggy = "heypiggy.com" in (stable_url or "").lower()
         _is_survey_detail = (
             "/survey/" in (stable_url or "").lower() or "/s/" in (stable_url or "").lower()
         )
-        _is_google_oauth = "accounts.google." in (stable_url or "").lower()
+        _needs_dashboard_bootstrap = _needs_post_login_dashboard_bootstrap(stable_url)
 
         # Wenn wir weder auf heypiggy noch auf einer Survey-Detail-Page sind,
         # navigieren wir explizit zum konfigurierten Dashboard. Das greift
         # z.B. wenn OAuth auf einem "Welcome"-Screen haengen bleibt.
-        if not _is_heypiggy or _is_google_oauth:
+        if _needs_dashboard_bootstrap:
             _dashboard_url = WORKER_CONFIG.queue.dashboard_url
-            audit("post_login_force_navigate", target=_dashboard_url)
+            audit("post_login_force_navigate", source=stable_url or "", target=_dashboard_url)
             try:
                 await execute_bridge(
                     "navigate",
