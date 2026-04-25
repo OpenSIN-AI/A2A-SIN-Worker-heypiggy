@@ -17,8 +17,10 @@ narrow ``except`` clauses against the classes defined here.
 Class hierarchy::
 
     WorkerError                      (root, never raise directly)
-    ├── ConfigurationError           (bad env / missing required setting)
-    ├── PreflightError               (startup sanity-check failed)
+    ├── ConfigError                  (bad env / missing required setting)
+    │   ├── ConfigurationError       (backward-compatible alias)
+    │   └── PreflightError          (startup sanity-check failed)
+    ├── RecoverableError             (transient, retryable problems)
     ├── BridgeError                  (a2a bridge process / IPC)
     │   ├── BridgeTimeoutError
     │   ├── BridgeProtocolError
@@ -59,23 +61,31 @@ class WorkerError(Exception):
         return f"{base} [{extras}]"
 
 
+class RecoverableError(WorkerError):
+    """Base class for transient problems that callers may retry."""
+
+
+class ConfigError(WorkerError):
+    """Base class for configuration problems."""
+
+
 # ---------------------------------------------------------------------------
 # Config / preflight
 # ---------------------------------------------------------------------------
 
 
-class ConfigurationError(WorkerError):
+class ConfigurationError(ConfigError):
     # ========================================================================
-    # KLASSE: ConfigurationError(WorkerError)
+    # KLASSE: ConfigurationError(ConfigError)
     # ZWECK: 
     # WICHTIG: 
     # METHODEN: 
     # ========================================================================
     
-    """Required configuration is missing or invalid."""
+    """Backward-compatible alias for :class:`ConfigError`."""
 
 
-class PreflightError(WorkerError):
+class PreflightError(ConfigError):
     """A startup preflight check failed and the worker cannot safely run."""
 
 
@@ -88,7 +98,7 @@ class BridgeError(WorkerError):
     """Base class for a2a bridge failures."""
 
 
-class BridgeTimeoutError(BridgeError):
+class BridgeTimeoutError(BridgeError, RecoverableError):
     """A bridge call exceeded its allotted time."""
 
 
@@ -96,7 +106,7 @@ class BridgeProtocolError(BridgeError):
     """The bridge returned malformed or unexpected output."""
 
 
-class BridgeUnavailableError(BridgeError):
+class BridgeUnavailableError(BridgeError, RecoverableError):
     """The bridge process is not running or not reachable."""
 
 
@@ -109,11 +119,11 @@ class VisionError(WorkerError):
     """Base class for vision-pipeline failures."""
 
 
-class VisionTimeoutError(VisionError):
+class VisionTimeoutError(VisionError, RecoverableError):
     """The vision endpoint did not respond in time."""
 
 
-class VisionRateLimitError(VisionError):
+class VisionRateLimitError(VisionError, RecoverableError):
     """The vision endpoint returned HTTP 429 / quota exceeded."""
 
 
@@ -134,7 +144,7 @@ class ElementNotFoundError(ActionError):
     """Target DOM element was not found on the page."""
 
 
-class ActionTimeoutError(ActionError):
+class ActionTimeoutError(ActionError, RecoverableError):
     """An action (click / type / wait) exceeded its deadline."""
 
 
@@ -194,9 +204,11 @@ __all__ = [
     "BridgeProtocolError",
     "BridgeTimeoutError",
     "BridgeUnavailableError",
+    "ConfigError",
     "ConfigurationError",
     "ElementNotFoundError",
     "PreflightError",
+    "RecoverableError",
     "SelectorNotFoundError",
     "ShutdownRequested",
     "SitepackValidationError",

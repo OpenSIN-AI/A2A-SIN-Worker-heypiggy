@@ -1,8 +1,8 @@
 # ================================================================================
 # DATEI: __init__.py
 # PROJEKT: A2A-SIN-Worker-heyPiggy (OpenSIN AI Agent System)
-# ZWECK: 
-# WICHTIG FÜR ENTWICKLER: 
+# ZWECK:
+# WICHTIG FÜR ENTWICKLER:
 #   - Ändere nichts ohne zu verstehen was passiert
 #   - Jeder Kommentar erklärt WARUM etwas getan wird, nicht nur WAS
 #   - Bei Fragen erst Code lesen, dann ändern
@@ -21,6 +21,7 @@ Public API::
         configure_logging,
         get_logger,
         retry,
+        retry_async,
         RetryPolicy,
         AuditLogger,
         ShutdownController,
@@ -44,9 +45,11 @@ from worker.exceptions import (
     BridgeProtocolError,
     BridgeTimeoutError,
     BridgeUnavailableError,
+    ConfigError,
     ConfigurationError,
     ElementNotFoundError,
     PreflightError,
+    RecoverableError,
     ShutdownRequested,
     VisionCircuitOpenError,
     VisionError,
@@ -56,7 +59,7 @@ from worker.exceptions import (
 )
 from worker.logging import configure_logging, get_logger
 from worker.loop import run_worker
-from worker.retry import RetryPolicy, retry
+from worker.retry import RetryPolicy, retry, retry_async
 from worker.shutdown import ShutdownController
 
 __all__ = [
@@ -68,9 +71,11 @@ __all__ = [
     "BridgeProtocolError",
     "BridgeTimeoutError",
     "BridgeUnavailableError",
+    "ConfigError",
     "ConfigurationError",
     "ElementNotFoundError",
     "PreflightError",
+    "RecoverableError",
     "RetryPolicy",
     "ShutdownController",
     "ShutdownRequested",
@@ -85,5 +90,6 @@ __all__ = [
     "current_context",
     "get_logger",
     "retry",
+    "retry_async",
     "run_worker",
 ]

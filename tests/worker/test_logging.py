@@ -41,6 +41,9 @@ class TestSecretRedaction:
         [
             "api_key",
             "API_KEY",
+            "BRIDGE_WS_URL",
+            "bridge_mcp_url",
+            "bridge_ws_url",
             "Authorization",
             "x-api-key",
             "bearer_token",

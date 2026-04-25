@@ -77,6 +77,10 @@ async def run_worker(ctx: WorkerContext, *, dry_run: bool = False) -> None:
         async with trace_span("worker.preflight", run_id=ctx.artifacts.run_id):
             _run_preflight(ctx)
 
+        ctx.freeze()
+        _log.info("worker_context_frozen", run_id=ctx.artifacts.run_id)
+        audit.emit("worker_context_frozen", run_id=ctx.artifacts.run_id)
+
         if dry_run:
             _log.info("worker_dry_run_ok", run_id=ctx.artifacts.run_id)
             audit.emit("worker_run_dry_run_ok", run_id=ctx.artifacts.run_id)

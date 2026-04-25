@@ -108,6 +108,17 @@ class TestWorkerContextLifecycle:
         # Clean up contextvar to avoid bleeding into other tests.
         wlog.set_tab_id(None)
 
+    def test_bind_driver_and_bridge_client(self, tmp_path: Path) -> None:
+        ctx = self._make_ctx(tmp_path)
+        driver = object()
+        bridge_client = object()
+
+        ctx.bind_driver(driver)
+        ctx.bind_bridge_client(bridge_client)
+
+        assert ctx.driver is driver
+        assert ctx.bridge_client is bridge_client
+
     def test_reset_per_step_state(self, tmp_path: Path) -> None:
         ctx = self._make_ctx(tmp_path)
         ctx.actions.captcha_attempts = 4
@@ -115,6 +126,34 @@ class TestWorkerContextLifecycle:
         ctx.reset_per_step_state()
         assert ctx.actions.captcha_attempts == 0
         assert ctx.vision.cache == {}
+
+    def test_run_id_and_paths_aliases(self, tmp_path: Path) -> None:
+        ctx = self._make_ctx(tmp_path)
+        assert ctx.run_id == "r-test"
+        assert ctx.paths is ctx.artifacts
+
+    def test_freeze_blocks_late_mutation(self, tmp_path: Path) -> None:
+        ctx = self._make_ctx(tmp_path)
+        frozen = ctx.freeze()
+
+        assert frozen is ctx
+
+        with pytest.raises(RuntimeError):
+            ctx.bind_tab(tab_id=1, window_id=2)
+        with pytest.raises(RuntimeError):
+            ctx.bind_driver(object())
+        with pytest.raises(RuntimeError):
+            ctx.bind_bridge_client(object())
+        with pytest.raises(RuntimeError):
+            ctx.actions.reset()
+        with pytest.raises(RuntimeError):
+            ctx.bridge.next_request_id()
+        with pytest.raises(RuntimeError):
+            ctx.vision.cache_clear()
+        with pytest.raises(RuntimeError):
+            ctx.driver = object()
+        with pytest.raises(RuntimeError):
+            ctx.bridge_client = object()
 
     def test_nested_contexts_restore_correctly(self, tmp_path: Path) -> None:
         outer = self._make_ctx(tmp_path)

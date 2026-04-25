@@ -53,7 +53,11 @@ async def test_dry_run_does_not_touch_bridge(ctx: WorkerContext) -> None:
     assert audit_path.exists()
     content = audit_path.read_text(encoding="utf-8")
     assert "worker_run_started" in content
+    assert "worker_context_frozen" in content
     assert "worker_run_dry_run_ok" in content
+
+    with pytest.raises(RuntimeError, match="frozen"):
+        ctx.bind_driver(object())
 
 
 @pytest.mark.asyncio

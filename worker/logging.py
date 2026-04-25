@@ -41,6 +41,8 @@ from typing import TYPE_CHECKING, Any, Final, Literal, cast
 import structlog
 from structlog.typing import EventDict, Processor
 
+from worker.exceptions import WorkerError
+
 if TYPE_CHECKING:
     from structlog.stdlib import BoundLogger
 
@@ -77,6 +79,8 @@ DENY_KEYS: Final[frozenset[str]] = frozenset(
     {
         "api_key",
         "apikey",
+        "bridge_mcp_url",
+        "bridge_ws_url",
         "authorization",
         "auth",
         "bearer",
@@ -139,7 +143,6 @@ def _enrich_worker_errors(_logger: Any, _method: str, event_dict: EventDict) -> 
     exc_info = event_dict.get("exc_info")
     if exc_info is None:
         return event_dict
-    from worker.exceptions import WorkerError  # local import to avoid cycles
 
     exc: BaseException | None = None
     if isinstance(exc_info, BaseException):

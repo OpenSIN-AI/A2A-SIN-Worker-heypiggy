@@ -23,6 +23,7 @@ EXPECTED_PUBLIC_NAMES: frozenset[str] = frozenset(
         "configure_logging",
         "get_logger",
         "retry",
+        "retry_async",
         "RetryPolicy",
         "AuditLogger",
         "ShutdownController",
@@ -30,8 +31,10 @@ EXPECTED_PUBLIC_NAMES: frozenset[str] = frozenset(
         "__version__",
         # Exceptions (the full public hierarchy)
         "WorkerError",
+        "ConfigError",
         "ConfigurationError",
         "PreflightError",
+        "RecoverableError",
         "ShutdownRequested",
         "BridgeError",
         "BridgeTimeoutError",

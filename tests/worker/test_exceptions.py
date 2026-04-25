@@ -8,9 +8,11 @@ from worker.exceptions import (
     ActionError,
     BridgeError,
     BridgeTimeoutError,
+    ConfigError,
     ConfigurationError,
     ElementNotFoundError,
     PreflightError,
+    RecoverableError,
     ShutdownRequested,
     VisionCircuitOpenError,
     VisionError,
@@ -21,8 +23,10 @@ from worker.exceptions import (
 class TestHierarchy:
     def test_all_inherit_from_worker_error(self) -> None:
         for cls in (
+            ConfigError,
             ConfigurationError,
             PreflightError,
+            RecoverableError,
             BridgeError,
             VisionError,
             ActionError,
@@ -30,8 +34,12 @@ class TestHierarchy:
         ):
             assert issubclass(cls, WorkerError)
 
+    def test_configuration_error_is_a_config_error(self) -> None:
+        assert issubclass(ConfigurationError, ConfigError)
+
     def test_bridge_timeout_is_bridge_error(self) -> None:
         assert issubclass(BridgeTimeoutError, BridgeError)
+        assert issubclass(BridgeTimeoutError, RecoverableError)
 
     def test_vision_circuit_open_is_vision_error(self) -> None:
         assert issubclass(VisionCircuitOpenError, VisionError)

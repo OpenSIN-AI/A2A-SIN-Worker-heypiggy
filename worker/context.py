@@ -34,14 +34,17 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Self, cast
+
+from circuit_breaker import CircuitBreaker
 
 from worker.exceptions import ConfigurationError
+from worker.logging import set_tab_id
 
 if TYPE_CHECKING:
     # Legacy modules imported lazily to keep the package importable without
     # them installed (useful for isolated unit tests).
-    from circuit_breaker import CircuitBreaker
     from config import WorkerConfig
     from observability import RunSummary
 
@@ -53,6 +56,30 @@ if TYPE_CHECKING:
 _current_context: ContextVar[WorkerContext | None] = ContextVar(
     "heypiggy_worker_context", default=None
 )
+
+
+class Freezable:
+    """Mixin for objects that can become immutable at runtime."""
+
+    __slots__ = ()
+
+    def _is_frozen(self) -> bool:
+        return bool(getattr(self, "_frozen", False))
+
+    def _ensure_mutable(self) -> None:
+        if self._is_frozen():
+            raise RuntimeError(f"{type(self).__name__} is frozen")
+
+    def freeze(self) -> Self:
+        object.__setattr__(self, "_frozen", True)
+        return self
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "_frozen" and self._is_frozen() and value is False:
+            raise RuntimeError(f"{type(self).__name__} is frozen; cannot unfreeze")
+        if name != "_frozen" and self._is_frozen() and not name.startswith("_"):
+            raise RuntimeError(f"{type(self).__name__} is frozen; cannot set {name}")
+        object.__setattr__(self, name, value)
 
 
 def current_context() -> WorkerContext:
@@ -73,7 +100,7 @@ def current_context() -> WorkerContext:
 
 
 @dataclass(slots=True)
-class BridgeState:
+class BridgeState(Freezable):
     # ========================================================================
     # KLASSE: BridgeState
     # ZWECK: 
@@ -86,40 +113,57 @@ class BridgeState:
     tab_id: int | None = None
     window_id: int | None = None
     request_id_counter: int = 0
+    _frozen: bool = field(default=False, init=False, repr=False, compare=False)
 
     def next_request_id(self) -> int:
         """Return a monotonically increasing request id."""
+        self._ensure_mutable()
         self.request_id_counter += 1
         return self.request_id_counter
 
 
 @dataclass(slots=True)
-class VisionState:
+class VisionState(Freezable):
     """Vision subsystem state — circuit breaker + per-run response cache."""
 
     circuit_breaker: CircuitBreaker
     cache: dict[tuple[str, str], dict[str, object]] = field(default_factory=dict)
+    _frozen: bool = field(default=False, init=False, repr=False, compare=False)
 
     def cache_clear(self) -> None:
         """Wipe the cache (called between runs / tab navigations)."""
+        self._ensure_mutable()
         self.cache.clear()
+
+    def freeze(self) -> Self:
+        """Freeze the cache so no later mutation can leak across runs."""
+        if not self._is_frozen():
+            frozen_cache = MappingProxyType(dict(self.cache))
+            object.__setattr__(
+                self,
+                "cache",
+                cast(dict[tuple[str, str], dict[str, object]], frozen_cache),
+            )
+        return super().freeze()
 
 
 @dataclass(slots=True)
-class ActionState:
+class ActionState(Freezable):
     """Counters that the controller uses to escalate between action modes."""
 
     captcha_attempts: int = 0
     click_escalation_step: int = 0
+    _frozen: bool = field(default=False, init=False, repr=False, compare=False)
 
     def reset(self) -> None:
         """Reset all counters to zero (called between control-loop steps)."""
+        self._ensure_mutable()
         self.captcha_attempts = 0
         self.click_escalation_step = 0
 
 
 @dataclass(slots=True)
-class ArtifactPaths:
+class ArtifactPaths(Freezable):
     """Resolved filesystem locations for run artifacts."""
 
     run_id: str
@@ -127,6 +171,7 @@ class ArtifactPaths:
     screenshot_dir: Path
     audit_dir: Path
     session_dir: Path
+    _frozen: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
     def audit_log(self) -> Path:
@@ -145,7 +190,7 @@ class ArtifactPaths:
 
 
 @dataclass(slots=True)
-class WorkerContext:
+class WorkerContext(Freezable):
     # ========================================================================
     # KLASSE: WorkerContext
     # ZWECK: 
@@ -168,12 +213,15 @@ class WorkerContext:
     bridge: BridgeState = field(default_factory=BridgeState)
     actions: ActionState = field(default_factory=ActionState)
     run_summary: RunSummary | None = None
+    driver: Any | None = None
+    bridge_client: Any | None = None
     extras: dict[str, Any] = field(default_factory=dict)
     """Free-form bag for caller-attached metadata. Do not abuse."""
 
     _token: Token[WorkerContext | None] | None = field(
         default=None, init=False, repr=False, compare=False
     )
+    _frozen: bool = field(default=False, init=False, repr=False, compare=False)
 
     # ----------------------------------------------------------- factories
 
@@ -192,8 +240,6 @@ class WorkerContext:
                 tests). Production code passes ``None`` and gets the
                 default thresholds from :mod:`circuit_breaker`.
         """
-        from circuit_breaker import CircuitBreaker  # local: legacy module
-
         artifacts = ArtifactPaths(
             run_id=config.artifacts.run_id,
             artifact_dir=Path(config.artifacts.artifact_dir),
@@ -206,6 +252,16 @@ class WorkerContext:
         cb = circuit_breaker or CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
         vision = VisionState(circuit_breaker=cb)
         return cls(config=config, artifacts=artifacts, vision=vision)
+
+    @property
+    def run_id(self) -> str:
+        """Convenience alias for the current run id."""
+        return self.artifacts.run_id
+
+    @property
+    def paths(self) -> ArtifactPaths:
+        """Convenience alias for the artifact-path bundle."""
+        return self.artifacts
 
     # -------------------------------------------------------- context mgr
 
@@ -227,16 +283,38 @@ class WorkerContext:
 
     def bind_tab(self, *, tab_id: int | None, window_id: int | None) -> None:
         """Update bridge identifiers + mirror into the logging correlation."""
-        from worker.logging import set_tab_id as _set_tab_id
-
+        self._ensure_mutable()
         self.bridge.tab_id = tab_id
         self.bridge.window_id = window_id
-        _set_tab_id(str(tab_id) if tab_id is not None else None)
+        set_tab_id(str(tab_id) if tab_id is not None else None)
+
+    def bind_driver(self, driver: Any | None) -> None:
+        """Attach the active browser driver to the context."""
+        self._ensure_mutable()
+        self.driver = driver
+
+    def bind_bridge_client(self, bridge_client: Any | None) -> None:
+        """Attach the active bridge client to the context."""
+        self._ensure_mutable()
+        self.bridge_client = bridge_client
 
     def reset_per_step_state(self) -> None:
         """Clear everything that should not leak between control-loop steps."""
+        self._ensure_mutable()
         self.actions.reset()
         self.vision.cache_clear()
+
+    def freeze(self) -> Self:
+        """Freeze the full runtime context and all mutable sub-states."""
+        if self._is_frozen():
+            return self
+        self.artifacts.freeze()
+        self.vision.freeze()
+        self.bridge.freeze()
+        self.actions.freeze()
+        frozen_extras = MappingProxyType(dict(self.extras))
+        object.__setattr__(self, "extras", cast(dict[str, Any], frozen_extras))
+        return super().freeze()
 
 
 __all__ = [
