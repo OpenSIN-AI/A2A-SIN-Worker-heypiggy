@@ -17,7 +17,8 @@
 - **Entry point:** `heypiggy-worker run` (CLI) or
   `python heypiggy_vision_worker.py` (legacy direct-run).
 - **PYTHONPATH:** MUST be set to `.` for local module discovery (media_router, etc).
-- **BRIDGE_MCP_URL:** Defaults to HF Spaces. DO NOT set to localhost unless running a local bridge.
+- **BRIDGE_MCP_URL:** Defaults to HF Spaces. DO NOT set to localhost unless you are intentionally running a local bridge.
+- **BRIDGE_ADAPTER / OPENSIN_BRIDGE_V2:** Opt-in bridge negotiation gate. Default stays legacy unless explicitly enabled.
 - **Model Names:** NEVER use `nvidia/` prefix in `config.py`. NIM API expects bare paths (e.g., `meta/llama-3.2-11b-vision-instruct`).
 - **Setup:** Use `pip install -e '.[dev]'` to ensure `pytest-asyncio` is present for tests.
 - **Primary LLM:** NVIDIA NIM `meta/llama-3.2-11b-vision-instruct` (vision).
@@ -58,7 +59,7 @@ export HEYPIGGY_EMAIL="you@example.com"
 export HEYPIGGY_PASSWORD="yourpassword"
 
 # Optional but highly recommended
-export BRIDGE_MCP_URL="http://127.0.0.1:7777"         # where Bridge listens
+export BRIDGE_MCP_URL="https://openjerro-opensin-bridge-mcp.hf.space/mcp"
 export HEYPIGGY_PERSONA="default"                     # which profile to use
 export HEYPIGGY_MAX_SURVEYS="25"                      # per run
 export BRAIN_URL="http://127.0.0.1:7070"              # Global Brain (optional)
@@ -98,9 +99,12 @@ failed (bridge down, login broken) · `4` worker error · `130` Ctrl-C.
 
 | Var | Default |
 |---|---|
-| `BRIDGE_MCP_URL` | `http://127.0.0.1:7777` |
-| `BRIDGE_HEALTH_URL` | `http://127.0.0.1:7777/health` |
+| `BRIDGE_MCP_URL` | `https://openjerro-opensin-bridge-mcp.hf.space/mcp` |
+| `BRIDGE_HEALTH_URL` | `https://openjerro-opensin-bridge-mcp.hf.space/health` |
 | `BRIDGE_CONNECT_TIMEOUT` | `30` |
+| `BRIDGE_ADAPTER` | `legacy` (or `opensin` when opting in) |
+| `OPENSIN_BRIDGE_V2` | `0` |
+| `OPENSIN_V2` | `0` (legacy alias) |
 
 ### Vision / Models
 

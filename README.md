@@ -64,8 +64,11 @@ cp .env.example .env
 ## 🚀 Schnellstart
 
 ```bash
+# Worker-Umgebung prüfen
+heypiggy-worker doctor
+
 # Worker starten
-python heypiggy_vision_worker.py
+heypiggy-worker run
 
 # Oder mit Docker
 docker-compose up -d
@@ -111,7 +114,11 @@ Wichtige Umgebungsvariablen:
 |----------|--------------|----------|
 | `NVIDIA_API_KEY` | NVIDIA NIM API Key | `nvapi-...` |
 | `VISION_BACKEND` | Backend Auswahl | `auto`, `nvidia` |
-| `BRIDGE_WS_URL` | WebSocket URL zur Bridge | `ws://localhost:8765` |
+| `BRIDGE_MCP_URL` | HTTP URL zur Bridge | `https://.../mcp` |
+| `BRIDGE_HEALTH_URL` | Health-Endpoint der Bridge | `https://.../health` |
+| `BRIDGE_ADAPTER` | Bridge-Modus (`legacy`/`opensin`) | `opensin` |
+| `OPENSIN_BRIDGE_V2` | Opt-in Alias für V2-Adapter | `1` |
+| `INFISICAL_AUTO_PULL` | Canonical Secrets automatisch laden | `1` |
 | `PERSONA_FILE` | Pfad zur Persona-Datei | `profiles/jeremy.json` |
 
 ## 🧪 Tests
