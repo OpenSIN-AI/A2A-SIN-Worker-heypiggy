@@ -1,36 +1,18 @@
-# ================================================================================
-# DATEI: retry.py
-# PROJEKT: A2A-SIN-Worker-heyPiggy (OpenSIN AI Agent System)
-# ZWECK: 
-# WICHTIG FÜR ENTWICKLER: 
-#   - Ändere nichts ohne zu verstehen was passiert
-#   - Jeder Kommentar erklärt WARUM etwas getan wird, nicht nur WAS
-#   - Bei Fragen erst Code lesen, dann ändern
-# ================================================================================
+"""Dependency-free async retry helpers.
 
-"""Generic async retry decorator with exponential backoff + jitter.
+The worker uses this for bridge / vision / network calls that may fail
+transiently. It intentionally does not depend on ``tenacity`` or any other
+third-party retry library.
 
-Used by the bridge and vision clients. Intentionally dependency-free —
-does not pull in :mod:`tenacity` to keep the runtime footprint small.
-
-Example::
-
-    from worker.retry import retry
-    from worker.exceptions import BridgeTimeoutError
-
-    @retry(attempts=3, retry_on=(BridgeTimeoutError,))
-    async def call_bridge(...) -> str: ...
-
-Cancellation is handled correctly: :class:`asyncio.CancelledError` and
-:class:`SystemExit` / :class:`KeyboardInterrupt` are **never** retried —
-even if the caller adds :class:`BaseException` to ``retry_on``. Retrying a
-cancelled task would silently deadlock the event loop, so the decorator
-always re-raises these to protect the shutdown path.
+Strict cancellation safety is built in: ``asyncio.CancelledError``,
+``KeyboardInterrupt`` and ``SystemExit`` are never retried, even if the
+caller asks to retry ``BaseException``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -44,50 +26,121 @@ _log = get_logger(__name__)
 T = TypeVar("T")
 AsyncFn = Callable[..., Awaitable[T]]
 
-#: Exceptions that are always re-raised, regardless of ``retry_on``. Retrying
-#: these would break cooperative cancellation and signal handling.
 _ALWAYS_RERAISE: Final[tuple[type[BaseException], ...]] = (
     asyncio.CancelledError,
     KeyboardInterrupt,
     SystemExit,
 )
 
+_VALID_LOG_LEVELS: Final[frozenset[str]] = frozenset(
+    {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class RetryPolicy:
-    # ========================================================================
-    # KLASSE: RetryPolicy
-    # ZWECK: 
-    # WICHTIG: 
-    # METHODEN: 
-    # ========================================================================
-    
-    """Static description of a retry policy."""
+    """Retry policy description for :func:`retry_async`."""
 
-    attempts: int = 3
+    max_attempts: int = 3
     base_delay: float = 0.5
     max_delay: float = 10.0
-    backoff: float = 2.0
-    jitter: float = 0.2  # ± fraction of current delay
+    jitter: float = 0.2
+    retry_on: tuple[type[BaseException], ...] = (Exception,)
+    log_level: str = "DEBUG"
 
     def __post_init__(self) -> None:
-        if self.attempts < 1:
-            raise ValueError("attempts must be >= 1")
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be >= 1")
         if self.base_delay < 0 or self.max_delay < 0:
             raise ValueError("delays must be non-negative")
-        if self.backoff < 1:
-            raise ValueError("backoff must be >= 1")
-        if not 0 <= self.jitter <= 1:
+        if self.jitter < 0 or self.jitter > 1:
             raise ValueError("jitter must be in [0, 1]")
+        normalized_level = self.log_level.upper()
+        if normalized_level not in _VALID_LOG_LEVELS:
+            raise ValueError(f"log_level must be one of {sorted(_VALID_LOG_LEVELS)}")
+        if not self.retry_on:
+            raise ValueError("retry_on must not be empty")
+        for exc_type in self.retry_on:
+            if not isinstance(exc_type, type) or not issubclass(exc_type, BaseException):
+                raise TypeError("retry_on entries must be exception classes")
+        object.__setattr__(self, "log_level", normalized_level)
+
+    @property
+    def attempts(self) -> int:
+        """Backward-compatible alias for ``max_attempts``."""
+        return self.max_attempts
 
     def compute_delay(self, attempt: int, *, rng: random.Random | None = None) -> float:
-        """Delay (seconds) before attempt number ``attempt`` (1-indexed)."""
-        raw = self.base_delay * (self.backoff ** (attempt - 1))
-        raw = min(raw, self.max_delay)
+        """Compute the backoff delay for a failed attempt.
+
+        ``attempt`` is 1-indexed and refers to the attempt that just failed.
+        The returned delay is the wait time before the *next* retry.
+        """
+        if attempt < 1:
+            raise ValueError("attempt must be >= 1")
+
+        raw_delay = self.base_delay * (2 ** (attempt - 1))
+        raw_delay = min(raw_delay, self.max_delay)
         if self.jitter:
             uniform = rng.uniform if rng is not None else random.uniform
-            raw *= 1 + uniform(-self.jitter, self.jitter)
-        return max(0.0, raw)
+            raw_delay *= 1 + uniform(-self.jitter, self.jitter)
+        return max(0.0, raw_delay)
+
+
+def _emit_retry_log(level: str, event: str, **data: Any) -> None:
+    method = cast(Callable[..., Any] | None, getattr(_log, level.lower(), None))
+    if method is None:
+        _log.debug(event, **data)
+        return
+    method(event, **data)
+
+
+def retry_async(
+    policy: RetryPolicy,
+    *,
+    on_retry: Callable[[int, BaseException, float], Awaitable[None] | None] | None = None,
+) -> Callable[[AsyncFn[T]], AsyncFn[T]]:
+    """Decorate an async callable with exponential-backoff retries."""
+
+    def decorator(fn: AsyncFn[T]) -> AsyncFn[T]:
+        @wraps(fn)
+        async def wrapper(*args: Any, **kwargs: Any) -> T:
+            for attempt in range(1, policy.max_attempts + 1):
+                try:
+                    return await fn(*args, **kwargs)
+                except _ALWAYS_RERAISE:
+                    raise
+                except policy.retry_on as exc:
+                    if attempt >= policy.max_attempts:
+                        _log.warning(
+                            "retry_exhausted",
+                            function=fn.__qualname__,
+                            attempts=attempt,
+                            exc=exc,
+                        )
+                        raise
+
+                    delay = policy.compute_delay(attempt)
+                    _emit_retry_log(
+                        policy.log_level,
+                        "retry_attempt",
+                        function=fn.__qualname__,
+                        attempt=attempt,
+                        next_attempt=attempt + 1,
+                        delay_seconds=round(delay, 3),
+                        exc=exc,
+                    )
+                    if on_retry is not None:
+                        maybe = on_retry(attempt, exc, delay)
+                        if inspect.isawaitable(maybe):
+                            await maybe
+                    await asyncio.sleep(delay)
+
+            raise RuntimeError("unreachable retry loop exit")  # pragma: no cover
+
+        return wrapper
+
+    return decorator
 
 
 def retry(
@@ -95,74 +148,20 @@ def retry(
     attempts: int = 3,
     base_delay: float = 0.5,
     max_delay: float = 10.0,
-    backoff: float = 2.0,
     jitter: float = 0.2,
     retry_on: tuple[type[BaseException], ...] = (Exception,),
-    reraise_on: tuple[type[BaseException], ...] = (),
+    log_level: str = "DEBUG",
 ) -> Callable[[AsyncFn[T]], AsyncFn[T]]:
-    """Decorate an async callable with exponential-backoff retries.
-
-    Args:
-        attempts: Total attempts including the first. ``attempts=1`` disables
-            retry entirely.
-        base_delay: Initial delay before the second attempt.
-        max_delay: Hard cap for any single backoff sleep.
-        backoff: Multiplicative factor between attempts.
-        jitter: Fractional jitter (``0.2`` = ±20 %).
-        retry_on: Exceptions that trigger a retry.
-        reraise_on: Exceptions that are *never* retried, even if they also
-            match ``retry_on``. Takes precedence.
-
-    Returns:
-        The decorated callable.
-    """
+    """Backward-compatible wrapper around :func:`retry_async`."""
     policy = RetryPolicy(
-        attempts=attempts,
+        max_attempts=attempts,
         base_delay=base_delay,
         max_delay=max_delay,
-        backoff=backoff,
         jitter=jitter,
+        retry_on=retry_on,
+        log_level=log_level,
     )
-    # Cancellation + top-level signals are never retryable, no matter what
-    # the caller passed in. Prepend them so they always win the race.
-    effective_reraise: tuple[type[BaseException], ...] = _ALWAYS_RERAISE + tuple(reraise_on)
-
-    def decorator(fn: AsyncFn[T]) -> AsyncFn[T]:
-        @wraps(fn)
-        async def wrapper(*args: Any, **kwargs: Any) -> T:
-            last_exc: BaseException | None = None
-            for attempt in range(1, policy.attempts + 1):
-                try:
-                    return await fn(*args, **kwargs)
-                except effective_reraise:
-                    raise
-                except retry_on as exc:
-                    last_exc = exc
-                    if attempt >= policy.attempts:
-                        _log.warning(
-                            "retry_exhausted",
-                            function=fn.__qualname__,
-                            attempts=attempt,
-                            error=type(exc).__name__,
-                            error_message=str(exc),
-                        )
-                        raise
-                    delay = policy.compute_delay(attempt)
-                    _log.info(
-                        "retry_scheduled",
-                        function=fn.__qualname__,
-                        attempt=attempt,
-                        next_attempt=attempt + 1,
-                        delay_seconds=round(delay, 3),
-                        error=type(exc).__name__,
-                    )
-                    await asyncio.sleep(delay)
-            # Unreachable — the loop either returns or raises.
-            raise cast(BaseException, last_exc)  # pragma: no cover
-
-        return wrapper
-
-    return decorator
+    return retry_async(policy)
 
 
-__all__ = ["RetryPolicy", "retry"]
+__all__ = ["RetryPolicy", "retry", "retry_async"]

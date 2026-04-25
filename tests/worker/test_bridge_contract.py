@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 from email.message import Message
@@ -7,8 +8,14 @@ import urllib.error
 
 import pytest
 
-from worker.bridge_contract import BridgeRequest, BridgeResponse, call_bridge_with_retry
+from worker.bridge_contract import (
+    BridgeRequest,
+    BridgeResponse,
+    call_bridge_with_retry,
+    call_bridge_with_retry_async,
+)
 from worker.exceptions import BridgeUnavailableError
+from worker.retry import RetryPolicy
 
 
 class _FakeHttpResponse:
@@ -100,3 +107,91 @@ def test_call_bridge_with_retry_does_not_retry_http_4xx(monkeypatch: pytest.Monk
 
     with pytest.raises(BridgeUnavailableError):
         call_bridge_with_retry("https://bridge.example/mcp", BridgeRequest(method="tools/call"))
+
+
+@pytest.mark.asyncio
+async def test_call_bridge_with_retry_async_retries_transient_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"count": 0}
+
+    def _perform_bridge_request(base_url: str, request: BridgeRequest) -> BridgeResponse:
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise urllib.error.URLError("temporary")
+        return BridgeResponse(ok=True, result={"ok": True}, attempt_count=1)
+
+    monkeypatch.setattr("worker.bridge_contract._perform_bridge_request", _perform_bridge_request)
+
+    response = await call_bridge_with_retry_async(
+        "https://bridge.example/mcp",
+        BridgeRequest(method="tools/call"),
+    )
+
+    assert response.ok is True
+    assert response.attempt_count == 3
+    assert calls["count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_call_bridge_with_retry_async_propagates_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"count": 0}
+
+    def _perform_bridge_request(base_url: str, request: BridgeRequest) -> BridgeResponse:
+        calls["count"] += 1
+        raise BridgeUnavailableError("bridge returned caller error", method=request.method)
+
+    monkeypatch.setattr("worker.bridge_contract._perform_bridge_request", _perform_bridge_request)
+
+    with pytest.raises(BridgeUnavailableError):
+        await call_bridge_with_retry_async(
+            "https://bridge.example/mcp",
+            BridgeRequest(method="tools/call"),
+    )
+
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_call_bridge_with_retry_async_raises_after_transient_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"count": 0}
+
+    def _perform_bridge_request(base_url: str, request: BridgeRequest) -> BridgeResponse:
+        calls["count"] += 1
+        raise urllib.error.URLError("down")
+
+    monkeypatch.setattr("worker.bridge_contract._perform_bridge_request", _perform_bridge_request)
+
+    with pytest.raises(BridgeUnavailableError):
+        await call_bridge_with_retry_async(
+            "https://bridge.example/mcp",
+            BridgeRequest(method="tools/call"),
+            policy=RetryPolicy(max_attempts=2, base_delay=0, jitter=0, retry_on=(urllib.error.URLError,)),
+        )
+
+    assert calls["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_call_bridge_with_retry_async_propagates_cancelled_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"count": 0}
+
+    async def _to_thread(func, *args, **kwargs):
+        calls["count"] += 1
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("worker.bridge_contract.asyncio.to_thread", _to_thread)
+
+    with pytest.raises(asyncio.CancelledError):
+        await call_bridge_with_retry_async(
+            "https://bridge.example/mcp",
+            BridgeRequest(method="tools/call"),
+        )
+
+    assert calls["count"] == 1

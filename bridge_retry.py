@@ -18,8 +18,8 @@ Extension einen neuen Worker-Kontext startet. Ohne Retry reisst ein einzelner
 wir 98% dieser transienten Fehler ohne dass der Vision-Agent sie sieht.
 
 KONSEQUENZEN:
-- Der Aufrufer bekommt entweder ein gueltiges Ergebnis oder — nach 3 Versuchen
-  mit 200ms / 600ms / 1800ms Wartezeit — das letzte Error-Dict.
+- Der Aufrufer bekommt entweder ein gueltiges Ergebnis oder — nach den
+  konfigurierten Retry-Versuchen — das letzte Error-Dict.
 - Nicht-transiente Fehler (z.B. invalid_argument, auth) werden SOFORT
   zurueckgegeben (kein Retry), damit wir nicht Quota verbrennen.
 - Der Retry-Counter wird auditiert damit wir in run_summary sehen wie oft
@@ -28,10 +28,10 @@ KONSEQUENZEN:
 
 from __future__ import annotations
 
-import asyncio
 import inspect
-import random
 from typing import Any, Awaitable, Callable
+
+from worker.retry import RetryPolicy, retry_async
 
 
 # Signaturen die wir als "transient" klassifizieren. WHY: Substring-Match weil
@@ -81,6 +81,15 @@ TRANSIENT_CONTRACT_CODES: tuple[str, ...] = (
     "anti_bot_challenge",
     "rate_limit_remote",
 )
+
+
+class _TransientBridgeResult(Exception):
+    """Internal sentinel for result-based transient bridge failures."""
+
+    def __init__(self, result: Any, error_text: str) -> None:
+        super().__init__(error_text)
+        self.result = result
+        self.error_text = error_text
 
 PERMANENT_CONTRACT_CODES: tuple[str, ...] = (
     "rpc_invalid",
@@ -157,73 +166,79 @@ async def call_with_retry(
     audit: Callable[..., None] | None = None,
     on_retry: Callable[[int, str, float], Awaitable[None] | None] | None = None,
 ) -> Any:
-    """
-    Ruft `bridge(method, params)` mit Exponential Backoff bei transienten
-    Fehlern auf.
+    """Ruft `bridge(method, params)` mit Exponential Backoff auf."""
 
-    Args:
-      bridge: Die eigentliche execute_bridge-Funktion des Workers.
-      method: MCP-Methodenname.
-      params: Argumente.
-      max_attempts: Maximale Anzahl Versuche (inkl. erstem).
-      base_delay: Wartezeit vor zweitem Versuch in Sekunden.
-      max_delay: Obergrenze fuer Wartezeit.
-      audit: Optionaler Audit-Callback(event, **fields).
+    policy = RetryPolicy(
+        max_attempts=max_attempts,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        jitter=jitter,
+        retry_on=(_TransientBridgeResult,),
+    )
 
-    Returns:
-      Das Ergebnis des letzten Versuchs. Bei 'ok' wird sofort zurueckgegeben.
-    """
     attempt = 0
-    last_result: Any = None
-    while attempt < max_attempts:
-        error_text = ""
-        try:
-            call_result = bridge() if method is None else bridge(method, params)
-            result = await call_result if inspect.isawaitable(call_result) else call_result
-        except Exception as e:
-            # Exceptions aus der Bridge-Schicht selbst -> als transient behandeln
-            error_text = f"exception: {type(e).__name__}: {e}"
-            result = {"error": error_text}
-        attempt += 1
-        if not error_text:
-            error_text = _extract_error_text(result)
-        klass = classify_result(result)
-        if klass == "ok":
-            if attempt > 1 and audit:
-                audit(
-                    "bridge_retry_success",
-                    method=method,
-                    attempts=attempt,
-                )
-            return result
-        if klass == "permanent" or attempt >= max_attempts:
-            if attempt > 1 and audit:
-                audit(
-                    "bridge_retry_exhausted",
-                    method=method,
-                    attempts=attempt,
-                    classification=klass,
-                )
-            return result
-        # Transient -> exponential backoff mit Jitter
-        delay = min(max_delay, base_delay * (3.0 ** (attempt - 1)))
-        wait = delay + (delay * max(0.0, jitter) * random.random())
+    last_classification = "ok"
+    async def _audit_retry(attempt_no: int, exc: BaseException, delay: float) -> None:
+        error_text = exc.error_text if isinstance(exc, _TransientBridgeResult) else str(exc)
         if audit:
             audit(
                 "bridge_retry_wait",
                 method=method,
-                attempt=attempt,
-                wait_ms=round(wait * 1000),
-                classification=klass,
+                attempt=attempt_no,
+                wait_ms=round(delay * 1000),
+                classification="transient",
                 error=error_text[:120],
             )
         if on_retry:
-            maybe_awaitable = on_retry(attempt, error_text, wait)
+            maybe_awaitable = on_retry(attempt_no, error_text, delay)
             if inspect.isawaitable(maybe_awaitable):
                 await maybe_awaitable
-        await asyncio.sleep(wait)
-        last_result = result
-    return last_result
+
+    @retry_async(policy, on_retry=_audit_retry)
+    async def _attempt() -> Any:
+        nonlocal attempt, last_classification
+        try:
+            call_result = bridge() if method is None else bridge(method, params)
+            result = await call_result if inspect.isawaitable(call_result) else call_result
+        except Exception as exc:
+            error_text = f"exception: {type(exc).__name__}: {exc}"
+            last_classification = "transient"
+            attempt += 1
+            raise _TransientBridgeResult({"error": error_text}, error_text) from exc
+
+        klass = classify_result(result)
+        last_classification = klass
+        attempt += 1
+
+        if klass == "ok" or klass == "permanent":
+            return result
+
+        error_text = _extract_error_text(result)
+        raise _TransientBridgeResult(result, error_text)
+
+    try:
+        result = await _attempt()
+    except _TransientBridgeResult as exc:
+        if attempt > 1 and audit:
+            audit(
+                "bridge_retry_exhausted",
+                method=method,
+                attempts=attempt,
+                classification=last_classification,
+            )
+        return exc.result
+
+    if attempt > 1 and audit:
+        if last_classification == "ok":
+            audit("bridge_retry_success", method=method, attempts=attempt)
+        else:
+            audit(
+                "bridge_retry_exhausted",
+                method=method,
+                attempts=attempt,
+                classification=last_classification,
+            )
+    return result
 
 
 def _extract_error_text(result: Any) -> str:
