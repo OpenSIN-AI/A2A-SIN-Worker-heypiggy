@@ -5,6 +5,7 @@ import importlib
 import sys
 import types
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -167,3 +168,97 @@ def test_handle_consent_prompt_handles_german_checkbox_flow(worker_module, monke
         ("Annehmen und beginnen", "button"),
         ("Continue", "button"),
     ]
+
+
+def test_wait_for_page_settle_returns_on_url_change(worker_module, monkeypatch):
+    state = {"stage": 0}
+
+    class FakeLocator:
+        @property
+        def first(self):
+            return self
+
+        async def count(self):
+            return 0
+
+        async def is_visible(self):
+            return False
+
+    class FakePage:
+        @property
+        def url(self):
+            return "https://example.com/login" if state["stage"] == 0 else "https://example.com/dashboard"
+
+        def locator(self, selector):
+            return FakeLocator()
+
+        async def wait_for_load_state(self, state_name, timeout=None):
+            state["stage"] = 1
+
+    page = FakePage()
+
+    monkeypatch.setattr(worker_module.asyncio, "sleep", AsyncMock())
+
+    settled = asyncio.run(
+        worker_module._wait_for_page_settle(
+            page,
+            "https://example.com/login",
+            timeout_seconds=2,
+        )
+    )
+
+    assert settled is True
+
+
+def test_wait_for_page_settle_returns_on_visible_selector(worker_module, monkeypatch):
+    state = {"stage": 0}
+
+    class FakeLocator:
+        def __init__(self, selector: str):
+            self.selector = selector
+
+        @property
+        def first(self):
+            return self
+
+        async def count(self):
+            return 1 if state["stage"] >= 1 and "survey" in self.selector else 0
+
+        async def is_visible(self):
+            return state["stage"] >= 1 and "survey" in self.selector
+
+    class FakePage:
+        @property
+        def url(self):
+            return "https://example.com/dashboard"
+
+        def locator(self, selector):
+            return FakeLocator(selector)
+
+        async def wait_for_load_state(self, state_name, timeout=None):
+            state["stage"] = 1
+
+    page = FakePage()
+
+    monkeypatch.setattr(worker_module.asyncio, "sleep", AsyncMock())
+
+    settled = asyncio.run(
+        worker_module._wait_for_page_settle(
+            page,
+            "https://example.com/dashboard",
+            timeout_seconds=2,
+            selectors=("#survey_list .survey-item",),
+        )
+    )
+
+    assert settled is True
+
+
+def test_get_debug_hold_seconds_reads_env(worker_module, monkeypatch):
+    monkeypatch.setenv("HEYPIGGY_DEBUG_HOLD_SECONDS", "42")
+    assert worker_module.get_debug_hold_seconds() == 42
+
+
+def test_get_debug_hold_seconds_falls_back_on_invalid_env(worker_module, monkeypatch):
+    monkeypatch.setenv("HEYPIGGY_DEBUG_HOLD_SECONDS", "not-a-number")
+    assert worker_module.get_debug_hold_seconds() == 300

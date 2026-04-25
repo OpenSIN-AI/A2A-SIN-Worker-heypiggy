@@ -6,6 +6,8 @@
 import asyncio
 import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -32,7 +34,7 @@ async def main():
         ]
     )
 
-    await asyncio.sleep(8)
+    await wait_for_cdp_ready("http://localhost:9222", timeout_seconds=30)
 
     async with async_playwright() as p:
         try:
@@ -64,6 +66,25 @@ async def main():
             print(f"❌ Fehler: {e}")
 
     proc.terminate()
+
+
+async def wait_for_cdp_ready(cdp_url: str, timeout_seconds: int = 30) -> None:
+    """Wartet auf den CDP-Endpoint statt blind zu schlafen."""
+    deadline = time.monotonic() + timeout_seconds
+    last_error: Exception | None = None
+
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(f"{cdp_url}/json/version", timeout=2) as response:
+                if response.status == 200:
+                    return
+        except Exception as error:
+            last_error = error
+        await asyncio.sleep(0.5)
+
+    raise TimeoutError(
+        f"Chrome CDP at {cdp_url} not ready after {timeout_seconds}s: {last_error}"
+    )
 
 
 if __name__ == "__main__":

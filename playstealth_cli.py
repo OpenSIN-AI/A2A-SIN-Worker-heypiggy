@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -93,6 +94,35 @@ async def _wait_for_list(page, timeout_seconds: int) -> bool:
     return await wait_for_manual_login(page, timeout_seconds=timeout_seconds)
 
 
+async def _wait_for_page_settle(
+    page,
+    previous_url: str,
+    timeout_seconds: int = 10,
+    selectors: Sequence[str] = (),
+) -> bool:
+    """Wartet auf URL-/DOM-Veränderung statt fixer Sleeps."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if page.url != previous_url:
+            return True
+
+        for selector in selectors:
+            try:
+                locator = page.locator(selector)
+                if await locator.count() > 0 and await locator.first.is_visible():
+                    return True
+            except Exception:
+                continue
+
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=250)
+        except Exception:
+            pass
+        await asyncio.sleep(0.25)
+
+    return False
+
+
 async def _print_cards(page, context) -> list[dict[str, str]]:
     if page.is_closed() and context.pages:
         page = context.pages[0]
@@ -144,20 +174,31 @@ async def _click_card(page, index: int) -> None:
 
     best = cards.nth(min(index, count - 1))
     onclick = await best.get_attribute("onclick") or ""
+    before_url = page.url
     await best.scroll_into_view_if_needed(timeout=4000)
     try:
         await best.dispatch_event("click")
     except Exception:
         await best.click(timeout=4000, force=True)
 
-    await asyncio.sleep(2)
+    await _wait_for_page_settle(
+        page,
+        before_url,
+        timeout_seconds=12,
+        selectors=("#start-survey-button", 'iframe', '[role="dialog"]', '.modal', '.overlay'),
+    )
     print(f"📄 URL nach Klick: {page.url}")
     if "clickSurvey(" in onclick:
         sid = onclick.split("clickSurvey('")[1].split("')")[0]
         print(f"🧷 card onclick survey id: {sid}")
         result = await page.evaluate("sid => clickSurvey(sid)", sid)
         print(f"🧠 clickSurvey result: {result!r}")
-        await asyncio.sleep(3)
+        await _wait_for_page_settle(
+            page,
+            before_url,
+            timeout_seconds=12,
+            selectors=("#start-survey-button", 'iframe', '[role="dialog"]', '.modal', '.overlay'),
+        )
         try:
             selected_page = await _select_active_page(page.context, page)
             if selected_page is not page:
@@ -166,7 +207,12 @@ async def _click_card(page, index: int) -> None:
             handled_consent = await _handle_consent_prompt(page)
             if handled_consent:
                 print("✅ Consent-Dialog bearbeitet")
-                await asyncio.sleep(2)
+                await _wait_for_page_settle(
+                    page,
+                    page.url,
+                    timeout_seconds=10,
+                    selectors=("#start-survey-button", 'iframe', '[role="dialog"]', '.modal', '.overlay'),
+                )
                 selected_page = await _select_active_page(page.context, page)
                 if selected_page is not page:
                     page = selected_page
@@ -194,8 +240,14 @@ async def _click_card(page, index: int) -> None:
         try:
             modal_start = page.locator("#start-survey-button")
             if await modal_start.count():
+                modal_before_url = page.url
                 await modal_start.first.evaluate("el => el.click()")
-                await asyncio.sleep(3)
+                await _wait_for_page_settle(
+                    page,
+                    modal_before_url,
+                    timeout_seconds=12,
+                    selectors=("iframe", '[role="dialog"]', '.modal', '.overlay', "textarea", "button:has-text('Weiter')"),
+                )
                 try:
                     selected_page = await _select_active_page(page.context, page)
                     if selected_page is not page:
@@ -204,7 +256,12 @@ async def _click_card(page, index: int) -> None:
                     handled_consent = await _handle_consent_prompt(page)
                     if handled_consent:
                         print("✅ Consent-Dialog nach Start-Click bearbeitet")
-                        await asyncio.sleep(2)
+                        await _wait_for_page_settle(
+                            page,
+                            page.url,
+                            timeout_seconds=10,
+                            selectors=("iframe", '[role="dialog"]', '.modal', '.overlay', "textarea", "button:has-text('Weiter')"),
+                        )
                         selected_page = await _select_active_page(page.context, page)
                         if selected_page is not page:
                             page = selected_page
@@ -232,7 +289,7 @@ async def _run_open_list(timeout_seconds: int) -> int:
             print("✅ Login erkannt")
         if page.is_closed() and context.pages:
             page = context.pages[0]
-        await asyncio.sleep(1)
+        await _wait_for_page_settle(page, page.url, timeout_seconds=3, selectors=("#survey_list .survey-item",))
         await _print_cards(page, context)
         return 0
     finally:
@@ -253,7 +310,7 @@ async def _run_click_survey(timeout_seconds: int, index: int) -> int:
             print("✅ Login erkannt")
         if page.is_closed() and context.pages:
             page = context.pages[0]
-        await asyncio.sleep(1)
+        await _wait_for_page_settle(page, page.url, timeout_seconds=3, selectors=("#survey_list .survey-item",))
         await _print_cards(page, context)
         await _click_card(page, index)
         return 0

@@ -43,6 +43,17 @@ WINDOW_WIDTH = 1024
 WINDOW_HEIGHT = 768
 
 
+def get_debug_hold_seconds(default: int = 300) -> int:
+    """Liest die Debug-Haltezeit aus der ENV statt hart zu verdrahten."""
+    raw = os.environ.get("HEYPIGGY_DEBUG_HOLD_SECONDS", "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return default
+
+
 def detect_chrome_profile_dir() -> str:
     """Pick a Chrome profile dir, preferring the configured default."""
     preferred = os.environ.get("HEYPIGGY_CHROME_PROFILE_DIR", "Default")
@@ -145,6 +156,35 @@ async def wait_for_manual_login(page, timeout_seconds: int = 300) -> bool:
         ) or "page=dashboard" in current_url:
             return True
         await asyncio.sleep(1.5)
+    return False
+
+
+async def _wait_for_page_settle(
+    page,
+    previous_url: str,
+    timeout_seconds: int = 10,
+    selectors: tuple[str, ...] = (),
+) -> bool:
+    """Wartet auf URL-/DOM-Veränderung statt fixer Sleeps."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if page.url != previous_url:
+            return True
+
+        for selector in selectors:
+            try:
+                locator = page.locator(selector)
+                if await locator.count() > 0 and await locator.first.is_visible():
+                    return True
+            except Exception:
+                continue
+
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=250)
+        except Exception:
+            pass
+        await asyncio.sleep(0.25)
+
     return False
 
 
@@ -404,9 +444,15 @@ async def main():
 
         # Gehe zu HeyPiggy Login
         print("🌐 Navigiere zu HeyPiggy...")
+        before_login_url = page.url
         await page.goto("https://www.heypiggy.com/login")
         await page.wait_for_load_state("domcontentloaded")
-        await asyncio.sleep(2)
+        await _wait_for_page_settle(
+            page,
+            before_login_url,
+            timeout_seconds=6,
+            selectors=("button[type='submit']", "button:has-text('Anmelden')", "button:has-text('Login')", "button:has-text('Sign in')", "input[type='submit']"),
+        )
 
         # Check ob Login Seite
         print(f"📄 Aktuelle URL: {page.url}")
@@ -477,10 +523,16 @@ async def main():
             for sel in button_selectors:
                 try:
                     # Erst keyboard navigation versuchen
+                    before_login_submit_url = page.url
                     await page.keyboard.press("Tab")
                     await asyncio.sleep(0.3)
                     await page.keyboard.press("Enter")
-                    await asyncio.sleep(1)
+                    await _wait_for_page_settle(
+                        page,
+                        before_login_submit_url,
+                        timeout_seconds=5,
+                        selectors=("button[type='submit']", "button:has-text('Anmelden')", "button:has-text('Login')", "button:has-text('Sign in')", "input[type='submit']", "#survey_list .survey-item"),
+                    )
 
                     # Check ob wir eingeloggt sind
                     if "dashboard" in page.url.lower() or "login" not in page.url.lower():
@@ -490,7 +542,12 @@ async def main():
 
                     # Sonst Button klicken
                     if await human_click(page, sel):
-                        await asyncio.sleep(2)
+                        await _wait_for_page_settle(
+                            page,
+                            before_login_submit_url,
+                            timeout_seconds=5,
+                            selectors=("button[type='submit']", "button:has-text('Anmelden')", "button:has-text('Login')", "button:has-text('Sign in')", "input[type='submit']", "#survey_list .survey-item"),
+                        )
                         if "dashboard" in page.url.lower():
                             login_success = True
                             print("✅ Login Button geklickt - erfolgreich!")
@@ -510,7 +567,12 @@ async def main():
         print(f"📄 URL nach Login: {page.url}")
 
         # Warte auf Dashboard Inhalt
-        await asyncio.sleep(3)
+        await _wait_for_page_settle(
+            page,
+            page.url,
+            timeout_seconds=8,
+            selectors=("a[href*='survey']", "a[href*='umfrage']", ".survey-card", "[data-survey]", '#survey_list .survey-item'),
+        )
 
         # Suche nach verfügbaren Umfragen
         survey_selectors = [
@@ -551,6 +613,7 @@ async def main():
                     # Klicke auf den gewählten Einstieg (genau ein Nutzerklick)
                     clicked = False
                     try:
+                        before_target_click_url = page.url
                         await target.scroll_into_view_if_needed(timeout=4000)
                         await asyncio.sleep(0.5)
                         await target.click(timeout=4000, force=True)
@@ -563,7 +626,12 @@ async def main():
                         except Exception as js_click_error:
                             print(f"⚠️ JS-click fehlgeschlagen: {js_click_error}")
 
-                    await asyncio.sleep(3)
+                    await _wait_for_page_settle(
+                        page,
+                        before_target_click_url,
+                        timeout_seconds=10,
+                        selectors=("#survey_list .survey-item", '#start-survey-button', 'iframe', '[role="dialog"]', '.modal', '.overlay'),
+                    )
                     if context is not None and context.pages:
                         selected_page = await _select_active_page(context, page)
                         if selected_page is not page:
@@ -605,6 +673,7 @@ async def main():
                         if best_card is not None:
                             try:
                                 best_card_onclick = await best_card.get_attribute("onclick") or ""
+                                before_card_click_url = page.url
                                 await best_card.scroll_into_view_if_needed(timeout=4000)
                                 await asyncio.sleep(0.5)
                                 # Survey-Starts öffnen oft ein Popup/नई Seite. Wir fangen das
@@ -617,7 +686,12 @@ async def main():
                                     popup_page = await popup_info.value
                                 except Exception:
                                     await best_card.dispatch_event("click")
-                                await asyncio.sleep(3)
+                                await _wait_for_page_settle(
+                                    page,
+                                    before_card_click_url,
+                                    timeout_seconds=10,
+                                    selectors=("#start-survey-button", 'iframe', '[role="dialog"]', '.modal', '.overlay'),
+                                )
                                 try:
                                     body_text = await page.locator("body").inner_text(timeout=3000)
                                     print(f"🧾 Nach-Card-Click Body: {body_text[:300]!r}")
@@ -631,11 +705,17 @@ async def main():
                                         "')"
                                     )[0]
                                     print(f"🔧 Direct clickSurvey fallback: {survey_id}")
+                                    before_click_survey_url = page.url
                                     click_result = await page.evaluate(
                                         "sid => clickSurvey(sid)", survey_id
                                     )
                                     print(f"🧠 clickSurvey result: {click_result!r}")
-                                    await asyncio.sleep(3)
+                                    await _wait_for_page_settle(
+                                        page,
+                                        before_click_survey_url,
+                                        timeout_seconds=10,
+                                        selectors=("#start-survey-button", 'iframe', '[role="dialog"]', '.modal', '.overlay'),
+                                    )
                                     try:
                                         overlays = await page.evaluate(
                                             """
@@ -686,7 +766,12 @@ async def main():
                                         handled_consent = await _handle_consent_prompt(page)
                                         if handled_consent:
                                             print("✅ Consent-Dialog bearbeitet")
-                                            await asyncio.sleep(2)
+                                            await _wait_for_page_settle(
+                                                page,
+                                                page.url,
+                                                timeout_seconds=8,
+                                                selectors=("iframe", '[role="dialog"]', '.modal', '.overlay', "textarea", "button:has-text('Weiter')"),
+                                            )
                                             selected_page = await _select_active_page(context, page)
                                             if selected_page is not page:
                                                 page = selected_page
@@ -704,8 +789,14 @@ async def main():
                                     onclick = await best_card.get_attribute("onclick") or ""
                                     if "clickSurvey(" in onclick:
                                         survey_id = onclick.split("clickSurvey('")[1].split("')")[0]
+                                        before_invoke_click_url = page.url
                                         await page.evaluate("sid => clickSurvey(sid)", survey_id)
-                                        await asyncio.sleep(3)
+                                        await _wait_for_page_settle(
+                                            page,
+                                            before_invoke_click_url,
+                                            timeout_seconds=10,
+                                            selectors=("#start-survey-button", 'iframe', '[role="dialog"]', '.modal', '.overlay'),
+                                        )
                                         body_text = await page.locator("body").inner_text(
                                             timeout=3000
                                         )
@@ -766,10 +857,16 @@ async def main():
                             print(f"⚠️ Survey-Node-Scan fehlgeschlagen: {node_error}")
                         if best_el is not None:
                             try:
+                                before_best_el_url = page.url
                                 await best_el.scroll_into_view_if_needed(timeout=4000)
                                 await asyncio.sleep(0.5)
                                 await best_el.click(timeout=4000, force=True)
-                                await asyncio.sleep(3)
+                                await _wait_for_page_settle(
+                                    page,
+                                    before_best_el_url,
+                                    timeout_seconds=10,
+                                    selectors=("#start-survey-button", 'iframe', '[role="dialog"]', '.modal', '.overlay'),
+                                )
                                 try:
                                     body_text = await page.locator("body").inner_text(timeout=3000)
                                     print(f"🧾 Nach-Start Body: {body_text[:300]!r}")
@@ -781,8 +878,14 @@ async def main():
                         try:
                             modal_start = page.locator("#start-survey-button")
                             if await modal_start.count():
+                                before_modal_start_url = page.url
                                 await modal_start.first.evaluate("el => el.click()")
-                                await asyncio.sleep(3)
+                                await _wait_for_page_settle(
+                                    page,
+                                    before_modal_start_url,
+                                    timeout_seconds=10,
+                                    selectors=("iframe", '[role="dialog"]', '.modal', '.overlay', "textarea", "button:has-text('Weiter')"),
+                                )
                                 try:
                                     body_text = await page.locator("body").inner_text(timeout=3000)
                                     print(f"🧾 Nach-Modal-Start Body: {body_text[:300]!r}")
@@ -797,7 +900,12 @@ async def main():
                                         handled_consent = await _handle_consent_prompt(page)
                                         if handled_consent:
                                             print("✅ Consent-Dialog nach Modal-Start bearbeitet")
-                                            await asyncio.sleep(2)
+                                            await _wait_for_page_settle(
+                                                page,
+                                                page.url,
+                                                timeout_seconds=8,
+                                                selectors=("iframe", '[role="dialog"]', '.modal', '.overlay', "textarea", "button:has-text('Weiter')"),
+                                            )
                                             selected_page = await _select_active_page(context, page)
                                             if selected_page is not page:
                                                 page = selected_page
@@ -830,7 +938,7 @@ async def main():
         print("Drücke Ctrl+C zum Beenden")
 
         # Warte ewig (für Debug)
-        await asyncio.sleep(300)
+        await asyncio.sleep(get_debug_hold_seconds())
 
         if context is not None:
             await context.close()

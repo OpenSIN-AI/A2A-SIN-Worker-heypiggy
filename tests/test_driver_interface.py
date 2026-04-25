@@ -148,6 +148,174 @@ class TestBrowserDriver:
         assert result.width == 1234
         assert result.height == 567
 
+    def test_playwright_snapshot_falls_back_when_accessibility_api_missing(self):
+        class FakePage:
+            url = "https://example.com/dashboard"
+
+            async def content(self):
+                return "<html><body>dashboard</body></html>"
+
+            async def title(self):
+                return "Dashboard"
+
+            async def evaluate(self, script):
+                assert "[id^=\"survey-\"]" in script
+                return "button#survey-1: Start survey"
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._page = FakePage()
+
+        result = asyncio.run(driver.snapshot())
+
+        assert result.url == "https://example.com/dashboard"
+        assert result.title == "Dashboard"
+        assert result.accessibility_tree == "button#survey-1: Start survey"
+
+    def test_playwright_snapshot_prefers_native_accessibility_when_available(self):
+        class FakeAccessibility:
+            async def snapshot(self):
+                return {"role": "WebArea", "name": "HeyPiggy"}
+
+        class FakePage:
+            url = "https://example.com/dashboard"
+            accessibility = FakeAccessibility()
+
+            async def content(self):
+                return "<html><body>dashboard</body></html>"
+
+            async def title(self):
+                return "Dashboard"
+
+            async def evaluate(self, script):
+                raise AssertionError("fallback evaluate should not be used")
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._page = FakePage()
+
+        result = asyncio.run(driver.snapshot())
+
+        assert "WebArea" in result.accessibility_tree
+
+    def test_playwright_type_text_focuses_and_dispatches_events_for_selector(self):
+        class FakePage:
+            def __init__(self):
+                self.calls = []
+
+            async def focus(self, selector):
+                self.calls.append(("focus", selector))
+
+            async def fill(self, selector, text):
+                self.calls.append(("fill", selector, text))
+
+            async def dispatch_event(self, selector, event):
+                self.calls.append(("dispatch_event", selector, event))
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._page = FakePage()
+
+        result = asyncio.run(driver.type_text("Hello", selector="#name"))
+
+        assert result.success is True
+        assert result.characters_sent == 5
+        assert driver._page.calls == [
+            ("focus", "#name"),
+            ("fill", "#name", "Hello"),
+            ("dispatch_event", "#name", "input"),
+            ("dispatch_event", "#name", "change"),
+        ]
+
+    def test_playwright_type_text_keyboard_fallback_without_selector(self):
+        class FakeKeyboard:
+            def __init__(self):
+                self.calls = []
+
+            async def type(self, char, delay=None):
+                self.calls.append((char, delay))
+
+        class FakePage:
+            def __init__(self):
+                self.keyboard = FakeKeyboard()
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._page = FakePage()
+
+        result = asyncio.run(driver.type_text("ab"))
+
+        assert result.success is True
+        assert result.characters_sent == 2
+        assert len(driver._page.keyboard.calls) == 2
+
+    def test_playwright_click_uses_locator_click_first(self):
+        class FakeLocator:
+            def __init__(self):
+                self.clicked = []
+
+            @property
+            def first(self):
+                return self
+
+            async def click(self, timeout=None):
+                self.clicked.append(timeout)
+
+            async def bounding_box(self):
+                return None
+
+        class FakePage:
+            def __init__(self):
+                self.locator_calls = []
+                self.mouse = None
+                self._locator = FakeLocator()
+
+            def locator(self, selector):
+                self.locator_calls.append(selector)
+                return self._locator
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._page = FakePage()
+
+        result = asyncio.run(driver.click("#start-survey"))
+
+        assert result.success is True
+        assert driver._page.locator_calls == ["#start-survey"]
+        assert driver._page._locator.clicked == [5000]
+
+    def test_playwright_click_ref_uses_locator_click_first(self):
+        class FakeLocator:
+            def __init__(self):
+                self.clicked = []
+
+            @property
+            def first(self):
+                return self
+
+            async def click(self, timeout=None):
+                self.clicked.append(timeout)
+
+            async def bounding_box(self):
+                return None
+
+        class FakePage:
+            def __init__(self):
+                self.locator_calls = []
+                self.mouse = None
+                self._locator = FakeLocator()
+
+            def locator(self, selector):
+                self.locator_calls.append(selector)
+                return self._locator
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._page = FakePage()
+
+        result = asyncio.run(driver.click_ref("btn-123"))
+
+        assert result.success is True
+        assert result.element_ref == "btn-123"
+        assert driver._page.locator_calls == [
+            '[data-ref="btn-123"], [data-ref-id="btn-123"], [aria-label*="btn-123"], [text="btn-123"]'
+        ]
+        assert driver._page._locator.clicked == [3000]
+
 
 class TestCreateDriver:
     """Tests for create_driver factory function."""

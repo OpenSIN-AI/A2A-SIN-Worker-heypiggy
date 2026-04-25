@@ -618,39 +618,36 @@ class PlaywrightDriver(BrowserDriver):
         if not self._page:
             raise RuntimeError("Driver not initialized")
 
+        locator = self._page.locator(
+            f'[data-ref="{ref}"], [data-ref-id="{ref}"], [aria-label*="{ref}"], [text="{ref}"]'
+        ).first
+
         try:
-            # Versuche data-ref Selector
-            selector = (
-                f'[data-ref="{ref}"], [data-ref-id="{ref}"], [aria-label*="{ref}"], [text="{ref}"]'
-            )
-            await self._page.click(selector, timeout=3000)
+            await locator.click(timeout=3000)
             return ClickResult(success=True, element_ref=ref)
         except Exception:
             pass
 
         # METHODE 2: Human-like mouse movement
         try:
-            # Finde Element
-            element = await self._page.query_selector(selector)
-            if element:
-                box = await element.bounding_box()
-                if box:
-                    # Bewege Maus WIE EIN MENSCH (nicht instant!)
-                    target_x = box["x"] + box["width"] / 2
-                    target_y = box["y"] + box["height"] / 2
+            box = await locator.bounding_box()
+            if box:
+                # Bewege Maus WIE EIN MENSCH (nicht instant!)
+                target_x = box["x"] + box["width"] / 2
+                target_y = box["y"] + box["height"] / 2
 
-                    # Zufälliger Startpunkt
-                    await self._page.mouse.move(
-                        target_x + random.randint(-100, 100), target_y + random.randint(-100, 100)
-                    )
-                    # Bewege langsam zum Ziel
-                    await self._page.mouse.move(target_x, target_y)
-                    await asyncio.sleep(random.uniform(0.05, 0.15))
-                    # Mouse down/up wie ein Mensch
-                    await self._page.mouse.down()
-                    await asyncio.sleep(random.uniform(0.05, 0.15))  # HALTE maus taste!
-                    await self._page.mouse.up()
-                    return ClickResult(success=True, element_ref=ref)
+                # Zufälliger Startpunkt
+                await self._page.mouse.move(
+                    target_x + random.randint(-100, 100), target_y + random.randint(-100, 100)
+                )
+                # Bewege langsam zum Ziel
+                await self._page.mouse.move(target_x, target_y)
+                await asyncio.sleep(random.uniform(0.05, 0.15))
+                # Mouse down/up wie ein Mensch
+                await self._page.mouse.down()
+                await asyncio.sleep(random.uniform(0.05, 0.15))  # HALTE maus taste!
+                await self._page.mouse.up()
+                return ClickResult(success=True, element_ref=ref)
         except Exception as e:
             pass
 
@@ -667,12 +664,14 @@ class PlaywrightDriver(BrowserDriver):
         """Click per CSS Selector mit human-like behavior."""
         if not self._page:
             raise RuntimeError("Driver not initialized")
+        locator = self._page.locator(selector).first
         try:
-            element = await self._page.query_selector(selector)
-            if element:
-                box = await element.bounding_box()
+            await locator.click(timeout=5000)
+            return ClickResult(success=True)
+        except Exception as e:
+            try:
+                box = await locator.bounding_box()
                 if box:
-                    # Human-like mouse
                     await self._page.mouse.move(
                         box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
                     )
@@ -681,9 +680,8 @@ class PlaywrightDriver(BrowserDriver):
                     await asyncio.sleep(random.uniform(0.05, 0.15))
                     await self._page.mouse.up()
                     return ClickResult(success=True)
-            await self._page.click(selector, timeout=5000)
-            return ClickResult(success=True)
-        except Exception as e:
+            except Exception:
+                pass
             return ClickResult(success=False, error=str(e))
 
     async def type_text(
@@ -694,7 +692,15 @@ class PlaywrightDriver(BrowserDriver):
             raise RuntimeError("Driver not initialized")
         try:
             if selector:
-                await self._page.fill(selector, text)  # Schnell für Input Fields
+                # WHY: React/Vue Inputs brauchen Fokus + Input/Change Events,
+                # nicht nur einen nackten value-Setzer.
+                await self._page.focus(selector)
+                await self._page.fill(selector, text)
+                try:
+                    await self._page.dispatch_event(selector, "input")
+                    await self._page.dispatch_event(selector, "change")
+                except Exception:
+                    pass
             else:
                 # Human-like typing: jedes Zeichen mit zufälliger Verzögerung
                 min_delay, max_delay = self._type_delay_ms
@@ -714,6 +720,52 @@ class PlaywrightDriver(BrowserDriver):
         except Exception as e:
             return JavascriptResult(result=None, error=str(e))
 
+    async def _snapshot_accessibility_tree(self) -> str:
+        """Best effort accessibility snapshot for Playwright pages."""
+        if not self._page:
+            return ""
+
+        accessibility = getattr(self._page, "accessibility", None)
+        if accessibility is not None:
+            snapshot = getattr(accessibility, "snapshot", None)
+            if callable(snapshot):
+                try:
+                    tree = await snapshot()
+                    if tree is not None:
+                        return str(tree)
+                except Exception:
+                    pass
+
+        fallback_script = r"""
+        (() => {
+            const selectors = [
+                'button', 'a[href]', 'input', 'select', 'textarea',
+                '[role="button"]', '[role="link"]', '[role="checkbox"]',
+                '[role="radio"]', '[aria-label]', '[id^="survey-"]'
+            ];
+            const nodes = Array.from(document.querySelectorAll(selectors.join(',')));
+            const visible = nodes.filter((el) => {
+                if (!el) return false;
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 1 || rect.height < 1) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+                return rect.bottom >= 0 && rect.right >= 0;
+            });
+            return visible.slice(0, 120).map((el) => {
+                const role = el.getAttribute('role') || el.tagName.toLowerCase();
+                const label = el.getAttribute('aria-label') || el.innerText || el.textContent || '';
+                const id = el.id ? `#${el.id}` : '';
+                return `${role}${id}: ${label.replace(/\s+/g, ' ').trim()}`.trim();
+            }).filter(Boolean).join('\n');
+        })();
+        """
+        try:
+            result = await self._page.evaluate(fallback_script)
+        except Exception:
+            return ""
+        return result if isinstance(result, str) else str(result or "")
+
     async def snapshot(self, tab_id: int | None = None) -> SnapshotResult:
         """DOM Snapshot holen."""
         if not self._page:
@@ -721,12 +773,12 @@ class PlaywrightDriver(BrowserDriver):
         html = await self._page.content()
         url = self._page.url
         title = await self._page.title()
-        accessibility = await self._page.accessibility.snapshot()
+        accessibility = await self._snapshot_accessibility_tree()
         return SnapshotResult(
             html=html,
             url=url,
             title=title,
-            accessibility_tree=str(accessibility),
+            accessibility_tree=accessibility,
             elements=[],
         )
 
