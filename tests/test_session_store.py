@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,7 +14,7 @@ async def test_restore_session_injects_cookie_url(tmp_path: Path):
     cache.write_text(
         json.dumps(
             {
-                "saved_at": "2026-04-19T23:00:00Z",
+                "saved_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "domains": {
                     "heypiggy.com": {
                         "cookies": [

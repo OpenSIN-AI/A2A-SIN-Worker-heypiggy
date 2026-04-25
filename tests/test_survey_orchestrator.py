@@ -104,6 +104,79 @@ async def test_begin_with_explicit_url_starts_running(orch, bridge):
 
 
 @pytest.mark.asyncio
+async def test_wait_for_page_settle_returns_when_page_finishes_loading(orch, monkeypatch):
+    signatures = iter(
+        [
+            {
+                "url": "https://www.heypiggy.com/login",
+                "title": "Login",
+                "readyState": "loading",
+                "textHash": "1",
+                "htmlHash": "1",
+            },
+            {
+                "url": "https://www.heypiggy.com/login",
+                "title": "Login",
+                "readyState": "interactive",
+                "textHash": "2",
+                "htmlHash": "2",
+            },
+        ]
+    )
+
+    async def fake_page_signature():
+        return next(signatures)
+
+    monkeypatch.setattr(orch, "_page_signature", fake_page_signature)
+
+    result = await orch._wait_for_page_settle(
+        before_signature={
+            "url": "https://www.heypiggy.com/login",
+            "title": "Login",
+            "readyState": "loading",
+            "textHash": "1",
+            "htmlHash": "1",
+        },
+        context="test_load_finish",
+        timeout_sec=0.1,
+        poll_sec=0.0,
+    )
+
+    assert result["readyState"] == "interactive"
+    assert result["textHash"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_wait_for_page_settle_returns_when_page_is_already_ready(orch, monkeypatch):
+    async def fake_page_signature():
+        return {
+            "url": "https://www.heypiggy.com/survey/42",
+            "title": "Survey 42",
+            "readyState": "complete",
+            "textHash": "9",
+            "htmlHash": "9",
+        }
+
+    monkeypatch.setattr(orch, "_page_signature", fake_page_signature)
+
+    result = await orch._wait_for_page_settle(
+        before_signature={
+            "url": "https://www.heypiggy.com/survey/42",
+            "title": "Survey 42",
+            "readyState": "complete",
+            "textHash": "9",
+            "htmlHash": "9",
+        },
+        context="test_already_ready",
+        timeout_sec=0.1,
+        poll_sec=0.0,
+    )
+
+    assert result["url"] == "https://www.heypiggy.com/survey/42"
+    assert result["readyState"] == "complete"
+
+
+@pytest.mark.asyncio
 async def test_begin_with_no_urls_and_no_autodetect_sets_exhausted(bridge, tmp_history):
     # -------------------------------------------------------------------------
     # FUNKTION: test_begin_with_no_urls_and_no_autodetect_sets_exhausted
@@ -396,6 +469,70 @@ async def test_v2_dashboard_survey_matches_generic_visible_card(monkeypatch, bri
 @pytest.mark.asyncio
 async def test_v2_begin_dismisses_obvious_modal_before_scanning(monkeypatch, bridge, tmp_history):
     monkeypatch.setenv("OPENSIN_V2", "1")
+    monkeypatch.setattr(
+        SurveyOrchestrator,
+        "_page_signature",
+        AsyncMock(
+            side_effect=[
+                {
+                    "url": "https://www.heypiggy.com/login",
+                    "title": "Login",
+                    "readyState": "complete",
+                    "textHash": "1",
+                    "htmlHash": "1",
+                },
+                {
+                    "url": "https://www.heypiggy.com/",
+                    "title": "Dashboard",
+                    "readyState": "complete",
+                    "textHash": "2",
+                    "htmlHash": "2",
+                },
+                {
+                    "url": "https://www.heypiggy.com/",
+                    "title": "Dashboard",
+                    "readyState": "complete",
+                    "textHash": "2",
+                    "htmlHash": "2",
+                },
+                {
+                    "url": "https://www.heypiggy.com/survey/42",
+                    "title": "Survey 42",
+                    "readyState": "complete",
+                    "textHash": "3",
+                    "htmlHash": "3",
+                },
+                {
+                    "url": "https://www.heypiggy.com/survey/42",
+                    "title": "Survey 42",
+                    "readyState": "complete",
+                    "textHash": "3",
+                    "htmlHash": "3",
+                },
+                {
+                    "url": "https://www.heypiggy.com/survey/42",
+                    "title": "Survey 42",
+                    "readyState": "complete",
+                    "textHash": "3",
+                    "htmlHash": "3",
+                },
+                {
+                    "url": "https://www.heypiggy.com/survey/42",
+                    "title": "Survey 42",
+                    "readyState": "complete",
+                    "textHash": "3",
+                    "htmlHash": "3",
+                },
+                {
+                    "url": "https://www.heypiggy.com/survey/42",
+                    "title": "Survey 42",
+                    "readyState": "complete",
+                    "textHash": "3",
+                    "htmlHash": "3",
+                },
+            ]
+        ),
+    )
     bridge.side_effect = [
         {"items": []},
         {"ok": True},

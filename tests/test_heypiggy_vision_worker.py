@@ -113,6 +113,48 @@ class HeyPiggyWorkerPreflightTests(unittest.IsolatedAsyncioTestCase):
         execute_bridge.assert_not_awaited()
         check_bridge_alive.assert_not_awaited()
 
+    async def test_preflight_defaults_to_playwright_and_skips_bridge_check(self):
+        # -------------------------------------------------------------------------
+        # FUNKTION: test_preflight_defaults_to_playwright_and_skips_bridge_check
+        # PARAMETER: self
+        # ZWECK:
+        # WAS PASSIERT HIER:
+        # WARUM DIESER WEG:
+        # ACHTUNG:
+        # -------------------------------------------------------------------------
+
+        driver = MagicMock()
+        driver.is_initialized = True
+        driver.navigate = AsyncMock(return_value={"success": True})
+
+        check_bridge_alive = AsyncMock(return_value=True)
+        init_driver = AsyncMock(return_value=driver)
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "HEYPIGGY_EMAIL": "ops@example.com",
+                    "HEYPIGGY_PASSWORD": "secret",
+                },
+                clear=False,
+            ),
+            patch.object(worker, "audit", MagicMock()),
+            patch.object(worker, "check_bridge_alive", check_bridge_alive),
+            patch.object(worker, "_init_driver", init_driver),
+            patch.object(worker, "ensure_vision_probe_screenshot", return_value="/tmp/probe.png"),
+            patch.object(
+                worker,
+                "run_vision_model",
+                AsyncMock(return_value={"ok": True, "text": "ok"}),
+            ),
+        ):
+            result = await worker.ensure_worker_preflight()
+
+        self.assertEqual(result, {"ok": True, "reason": "ready"})
+        check_bridge_alive.assert_not_awaited()
+        init_driver.assert_awaited_once()
+
     async def test_main_stops_before_browser_mutation_when_vision_auth_fails(self):
         # -------------------------------------------------------------------------
         # FUNKTION: test_main_stops_before_browser_mutation_when_vision_auth_fails
@@ -374,6 +416,40 @@ class HeyPiggyWorkerClickPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(clicked)
         self.assertEqual(gate.failed_selectors, ["@e9"])
 
+    async def test_run_click_action_uses_direct_start_survey_modal_click(self):
+        gate = DummyGate()
+        with (
+            patch.object(worker, "click_start_survey_modal_button", AsyncMock(return_value=True)) as start_click,
+            patch.object(worker, "escalating_click", AsyncMock()) as escalating_click,
+        ):
+            clicked = await worker.run_click_action(
+                {"selector": "#start-survey-button"},
+                gate,
+                img_hash="hash1",
+                step_num=2,
+            )
+
+        self.assertTrue(clicked)
+        start_click.assert_awaited_once()
+        escalating_click.assert_not_called()
+
+    async def test_run_click_action_uses_choice_text_click_before_escalation(self):
+        gate = DummyGate()
+        with (
+            patch.object(worker, "click_visible_choice_with_text", AsyncMock(return_value={"clicked": True, "result": {"ok": True}})) as choice_click,
+            patch.object(worker, "escalating_click", AsyncMock()) as escalating_click,
+        ):
+            clicked = await worker.run_click_action(
+                {"description": "Ja"},
+                gate,
+                img_hash="hash2",
+                step_num=3,
+            )
+
+        self.assertTrue(clicked)
+        choice_click.assert_awaited_once_with("Ja")
+        escalating_click.assert_not_called()
+
     async def test_escalating_click_derives_dashboard_survey_selector_from_ref_only(self):
         gate_checks = AsyncMock(
             side_effect=[
@@ -403,6 +479,145 @@ class HeyPiggyWorkerClickPipelineTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(click_element_call.args[1]["selector"], "#survey-65467728")
 
+    async def test_escalating_click_accepts_modal_progress_without_vision_retry(self):
+        execute_bridge = AsyncMock(
+            side_effect=[
+                {"url": "https://www.heypiggy.com/?page=dashboard", "title": "HeyPiggy"},
+                {"success": True},
+            ]
+        )
+        detect_progress = AsyncMock(
+            return_value=(True, "DASHBOARD_MODAL_SURVEY", "Question is now visible")
+        )
+        vision_gate = AsyncMock()
+
+        with (
+            patch.object(worker, "execute_bridge", execute_bridge),
+            patch.object(worker, "resolve_survey_selector", AsyncMock(return_value="#survey-1")),
+            patch.object(worker, "_tab_params", return_value={"tabId": 7}),
+            patch.object(worker, "_detect_click_progress_state", detect_progress),
+            patch.object(worker, "_vision_gate_inside_escalation", vision_gate),
+            patch.object(worker, "_bridge_v2_enabled", return_value=False),
+        ):
+            clicked = await worker.escalating_click(selector="#survey-1", step_num=3)
+
+        self.assertTrue(clicked)
+        detect_progress.assert_awaited()
+        vision_gate.assert_not_awaited()
+
+    async def test_escalating_click_accepts_dom_change_without_fixed_sleep(self):
+        execute_bridge = AsyncMock(
+            side_effect=[
+                {"url": "https://www.heypiggy.com/?page=dashboard", "title": "HeyPiggy"},
+                {"success": True},
+                {"current_url": "https://www.heypiggy.com/survey/42", "current_title": "Survey"},
+            ]
+        )
+        detect_progress = AsyncMock(return_value=(False, "unknown", "no UI progress yet"))
+        vision_gate = AsyncMock()
+
+        with (
+            patch.object(worker, "execute_bridge", execute_bridge),
+            patch.object(worker, "resolve_survey_selector", AsyncMock(return_value="#survey-1")),
+            patch.object(worker, "_tab_params", return_value={"tabId": 7}),
+            patch.object(worker, "_detect_click_progress_state", detect_progress),
+            patch.object(
+                worker,
+                "dom_verify_change",
+                AsyncMock(
+                    return_value={
+                        "changed": True,
+                        "current_url": "https://www.heypiggy.com/survey/42",
+                        "current_title": "Survey",
+                    }
+                ),
+            ),
+            patch.object(worker, "_vision_gate_inside_escalation", vision_gate),
+            patch.object(worker, "_bridge_v2_enabled", return_value=False),
+        ):
+            clicked = await worker.escalating_click(selector="#survey-1", step_num=3)
+
+        self.assertTrue(clicked)
+        detect_progress.assert_awaited()
+        vision_gate.assert_not_awaited()
+
+    async def test_dom_verify_change_retries_when_page_info_is_temporarily_empty(self):
+        execute_bridge = AsyncMock(
+            side_effect=[
+                {"url": "", "title": "", "status": "loading"},
+                {
+                    "url": "https://www.heypiggy.com/survey/42",
+                    "title": "Survey 42",
+                    "status": "complete",
+                },
+            ]
+        )
+
+        with (
+            patch.object(worker, "execute_bridge", execute_bridge),
+            patch.object(worker, "_tab_params", return_value={"tabId": 7}),
+            patch.object(worker, "_bridge_tool_names", AsyncMock(return_value=[])),
+            patch.object(worker.asyncio, "sleep", AsyncMock()) as sleep_mock,
+        ):
+            result = await worker.dom_verify_change(
+                before_url="https://www.heypiggy.com/dashboard",
+                before_title="Dashboard",
+            )
+
+        self.assertTrue(result["changed"])
+        sleep_mock.assert_awaited()
+
+    async def test_detect_captcha_page_handles_null_bridge_result(self):
+        with (
+            patch.object(worker, "_tab_params", return_value={"tabId": 7}),
+            patch.object(worker, "execute_bridge", AsyncMock(return_value={"result": None})),
+        ):
+            detected = await worker.detect_captcha_page()
+
+        self.assertFalse(detected)
+
+    async def test_handle_captcha_v2_returns_true_without_fixed_sleep(self):
+        worker._captcha_attempt_count = 0
+        execute_bridge = AsyncMock(
+            side_effect=[
+                {"items": [{"selector": ".recaptcha-checkbox", "ref": "r1"}]},
+                {"success": True},
+            ]
+        )
+
+        with (
+            patch.object(worker, "_bridge_v2_enabled", return_value=True),
+            patch.object(worker, "_tab_params", return_value={"tabId": 7}),
+            patch.object(worker, "execute_bridge", execute_bridge),
+            patch.object(worker.asyncio, "sleep", AsyncMock()) as sleep_mock,
+        ):
+            handled = await worker.handle_captcha()
+
+        self.assertTrue(handled)
+        sleep_mock.assert_not_awaited()
+
+    async def test_handle_captcha_legacy_returns_true_without_fixed_sleep(self):
+        worker._captcha_attempt_count = 0
+
+        with (
+            patch.object(worker, "_bridge_v2_enabled", return_value=False),
+            patch.object(worker, "_tab_params", return_value={"tabId": 7}),
+            patch.object(
+                worker,
+                "execute_bridge",
+                AsyncMock(return_value={"result": {"clicked": True}}),
+            ),
+            patch.object(worker.asyncio, "sleep", AsyncMock()) as sleep_mock,
+        ):
+            handled = await worker.handle_captcha()
+
+        self.assertTrue(handled)
+        sleep_mock.assert_not_awaited()
+
+    async def test_resolve_survey_selector_keeps_non_card_survey_button_selector(self):
+        resolved = await worker.resolve_survey_selector("#start-survey-button")
+        self.assertEqual(resolved, "#start-survey-button")
+
     async def test_click_visible_button_with_text_prefers_click_ref(self):
         async def fake_bridge(method, params):
             if method == "dom.queryAll":
@@ -428,6 +643,28 @@ class HeyPiggyWorkerClickPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["clicked"])
         self.assertEqual(result["selector"], "@e11")
+
+    async def test_execute_via_driver_sanitizes_js_payload(self):
+        from types import SimpleNamespace
+
+        class FakeDriver:
+            def __init__(self):
+                self.calls = []
+
+            async def execute_javascript(self, script, tab_id=None):
+                self.calls.append((script, tab_id))
+                return SimpleNamespace(result={"ok": True}, error=None)
+
+        fake_driver = FakeDriver()
+
+        result = await worker._execute_via_driver(
+            fake_driver,
+            "execute_javascript",
+            {"script": "# comment\nconst x = 1;", "tabId": 7},
+        )
+
+        self.assertEqual(result, {"result": {"ok": True}, "error": None})
+        self.assertEqual(fake_driver.calls, [("const x = 1;", 7)])
 
 
 class HeyPiggyWorkerRefNormalizationTests(unittest.TestCase):

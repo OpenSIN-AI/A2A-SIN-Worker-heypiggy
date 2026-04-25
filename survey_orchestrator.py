@@ -261,6 +261,32 @@ class SurveyOrchestrator:
     })();
     """
 
+    PAGE_SIGNATURE_JS = r"""
+    (() => {
+      const root = document.body || document.documentElement;
+      const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+      const hash = (value) => {
+        let acc = 0;
+        for (let i = 0; i < value.length; i += 1) {
+          acc = ((acc << 5) - acc) + value.charCodeAt(i);
+          acc |= 0;
+        }
+        return String(acc);
+      };
+
+      const text = normalize(root ? (root.innerText || root.textContent || '') : '');
+      const html = root ? String(root.innerHTML || '') : '';
+
+      return {
+        url: window.location.href || '',
+        title: document.title || '',
+        readyState: document.readyState || '',
+        textHash: hash(text),
+        htmlHash: hash(html),
+      };
+    })();
+    """
+
     def __init__(
         self,
         *,
@@ -543,12 +569,16 @@ class SurveyOrchestrator:
             selector = str(next_button.get("selector", "") or "").strip()
             if ref:
                 try:
+                    before_signature = await self._page_signature()
                     await self._bridge(
                         "click_ref",
                         {"ref": ref, **self._tab_params()},
                     )
-                    await asyncio.sleep(2.0)
-                    current = await self._current_url()
+                    settled = await self._wait_for_page_settle(
+                        before_signature=before_signature,
+                        context="autodetect_spa_click_ref",
+                    )
+                    current = str(settled.get("url", "") or "") or await self._current_url()
                     if current:
                         self._audit("queue_url_autodetect_spa", url=current)
                         return current
@@ -557,12 +587,16 @@ class SurveyOrchestrator:
 
             if selector:
                 try:
+                    before_signature = await self._page_signature()
                     await self._bridge(
                         "ghost_click",
                         {"selector": selector, **self._tab_params()},
                     )
-                    await asyncio.sleep(2.0)
-                    current = await self._current_url()
+                    settled = await self._wait_for_page_settle(
+                        before_signature=before_signature,
+                        context="autodetect_spa_click_selector",
+                    )
+                    current = str(settled.get("url", "") or "") or await self._current_url()
                     if current:
                         self._audit("queue_url_autodetect_spa", url=current)
                         return current
@@ -571,11 +605,11 @@ class SurveyOrchestrator:
 
         # 3) Dashboard-Fallback
         await self._navigate_to(self._dashboard_url)
-        await asyncio.sleep(2.5)
         best = await self._find_best_dashboard_survey()
         if best and (best.get("selector") or best.get("ref")):
             # Klicken + URL der neuen Seite lesen
             try:
+                before_signature = await self._page_signature()
                 ref = str(best.get("ref", "") or "").strip()
                 if ref:
                     await self._bridge("click_ref", {"ref": ref, **self._tab_params()})
@@ -584,8 +618,11 @@ class SurveyOrchestrator:
                         "ghost_click",
                         {"selector": best["selector"], **self._tab_params()},
                     )
-                await asyncio.sleep(2.5)
-                current = await self._current_url()
+                settled = await self._wait_for_page_settle(
+                    before_signature=before_signature,
+                    context="dashboard_best_click",
+                )
+                current = str(settled.get("url", "") or "") or await self._current_url()
                 if current and current != self._dashboard_url:
                     if self._current is not None:
                         self._current.estimated_reward = best.get("reward", "")
@@ -722,6 +759,7 @@ class SurveyOrchestrator:
              Wenn ein klarer Schliessen-Button sichtbar ist, räumen wir ihn weg,
              bevor wir nach neuen Umfragen suchen.
         """
+        before_signature = await self._page_signature()
         try:
             if _bridge_v2_enabled():
                 result = await self._bridge(
@@ -760,14 +798,20 @@ class SurveyOrchestrator:
                         continue
                     if ref:
                         await self._bridge("click_ref", {"ref": ref, **self._tab_params()})
-                        await asyncio.sleep(1.0)
+                        await self._wait_for_page_settle(
+                            before_signature=before_signature,
+                            context="dismiss_modal_ref",
+                        )
                         self._audit("queue_modal_dismissed", via="ref")
                         return True
                     if selector:
                         await self._bridge(
                             "ghost_click", {"selector": selector, **self._tab_params()}
                         )
-                        await asyncio.sleep(1.0)
+                        await self._wait_for_page_settle(
+                            before_signature=before_signature,
+                            context="dismiss_modal_selector",
+                        )
                         self._audit("queue_modal_dismissed", via="selector")
                         return True
         except Exception as e:
@@ -783,9 +827,123 @@ class SurveyOrchestrator:
             pass
         return ""
 
+    async def _page_signature(self) -> dict[str, Any]:
+        """Liefert eine kleine Seiten-Signatur fuer dynamische Waits."""
+        try:
+            result = await self._bridge(
+                "execute_javascript",
+                {"script": self.PAGE_SIGNATURE_JS, **self._tab_params()},
+            )
+            payload = result.get("result") if isinstance(result, dict) else None
+            if isinstance(payload, dict):
+                return {
+                    "url": str(payload.get("url", "") or ""),
+                    "title": str(payload.get("title", "") or ""),
+                    "readyState": str(payload.get("readyState", "") or ""),
+                    "textHash": str(payload.get("textHash", "") or ""),
+                    "htmlHash": str(payload.get("htmlHash", "") or ""),
+                }
+        except Exception:
+            pass
+
+        try:
+            info = await self._bridge("get_page_info", self._tab_params())
+            if isinstance(info, dict):
+                payload = info.get("tab") if isinstance(info.get("tab"), dict) else info
+                if isinstance(payload, dict):
+                    return {
+                        "url": str(payload.get("url", "") or ""),
+                        "title": str(payload.get("title", "") or ""),
+                        "readyState": str(
+                            payload.get("status", "") or payload.get("readyState", "") or ""
+                        ),
+                        "textHash": "",
+                        "htmlHash": "",
+                    }
+        except Exception:
+            pass
+
+        return {}
+
+    @staticmethod
+    def _page_signature_changed(before: dict[str, Any], current: dict[str, Any]) -> bool:
+        return (
+            str(before.get("url", "") or "") != str(current.get("url", "") or "")
+            or str(before.get("title", "") or "") != str(current.get("title", "") or "")
+            or str(before.get("textHash", "") or "") != str(current.get("textHash", "") or "")
+            or str(before.get("htmlHash", "") or "") != str(current.get("htmlHash", "") or "")
+        )
+
+    async def _wait_for_page_settle(
+        self,
+        *,
+        before_signature: dict[str, Any],
+        context: str,
+        timeout_sec: float = 8.0,
+        poll_sec: float = 0.25,
+    ) -> dict[str, Any]:
+        """Wartet nach Navigation/Klick, bis die Seite wirklich bereit ist."""
+        deadline = time.monotonic() + timeout_sec
+        last_signature = dict(before_signature)
+        seen_interactive = False
+        empty_polls = 0
+
+        while True:
+            current = await self._page_signature()
+            has_data = bool(
+                current
+                and any(
+                    str(current.get(field, "") or "").strip()
+                    for field in ("url", "title", "readyState", "textHash", "htmlHash")
+                )
+            )
+            if has_data:
+                empty_polls = 0
+                last_signature = current
+                ready_state = str(current.get("readyState", "") or "").strip().lower()
+                if ready_state == "complete":
+                    return current
+
+                current_changed = self._page_signature_changed(before_signature, current)
+                if ready_state == "interactive":
+                    if current_changed or seen_interactive:
+                        return current
+                    seen_interactive = True
+                elif current_changed:
+                    # URL/Title/DOM sind bereits in Bewegung, aber die Seite ist noch
+                    # nicht stabil genug. Weiter warten statt blind zu schlafen.
+                    pass
+            else:
+                empty_polls += 1
+                if empty_polls >= 2:
+                    self._audit(
+                        "queue_navigation_signature_missing",
+                        context=context,
+                        timeout_sec=round(timeout_sec, 1),
+                        before=before_signature,
+                    )
+                    return last_signature
+
+            if time.monotonic() >= deadline:
+                self._audit(
+                    "queue_navigation_settle_timeout",
+                    context=context,
+                    timeout_sec=round(timeout_sec, 1),
+                    before=before_signature,
+                    after=last_signature,
+                )
+                return last_signature
+
+            await asyncio.sleep(poll_sec)
+
     async def _navigate_to(self, url: str) -> None:
         try:
+            before_signature = await self._page_signature()
             await self._bridge("navigate", {"url": url, **self._tab_params()})
+            await self._wait_for_page_settle(
+                before_signature=before_signature,
+                context=f"navigate:{url}",
+            )
         except Exception as e:
             self._audit("queue_navigate_error", url=url, error=str(e))
 

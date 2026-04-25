@@ -118,6 +118,12 @@ from platform_profile import active as _active_platform
 from bridge_retry import classify_result as _bridge_classify_result
 from bridge_retry import call_with_retry as _bridge_call_with_retry
 from budget_guard import BudgetGuard
+from worker.resilience_engine import (
+    press_keys_with_human_cadence,
+    sanitize_js_for_cdp,
+    type_text_with_human_cadence,
+)
+from opensin_runtime import UiFacts, UiSurfaceState, classify_ui_state
 
 # Import typed state machine for page state tracking
 from state_machine import page_state_machine
@@ -272,6 +278,7 @@ BRIDGE_CONTRACT_IDEMPOTENT_METHODS: set[str] = set()
 BRIDGE_CONTRACT_ERROR_CODES: set[str] = set()
 BRIDGE_CAPABILITY_TOOL_NAMES: set[str] | None = None
 BRIDGE_TOOL_SURFACE_KIND: str | None = None
+_SURVEY_START_PENDING = False
 BRIDGE_V2_REQUIRED_METHODS: frozenset[str] = frozenset(
     {
         "bridge.contract",
@@ -1657,6 +1664,236 @@ def _normalize_vision_decision(decision: dict[str, object], action_desc: str) ->
     return normalized
 
 
+async def _collect_ui_facts() -> UiFacts:
+    """Collect lightweight deterministic UI facts for state classification."""
+    js_code = r"""
+    (() => {
+        const isVisible = (el) => {
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            if (rect.width < 1 || rect.height < 1) return false;
+            return el.offsetParent !== null || style.position === 'fixed';
+        };
+        const textOf = (el) => ((el && (el.innerText || el.textContent)) || '').replace(/\s+/g, ' ').trim();
+        const pickFirstText = (selectors) => {
+            for (const selector of selectors) {
+                const nodes = Array.from(document.querySelectorAll(selector)).filter(isVisible);
+                for (const node of nodes) {
+                    const text = textOf(node);
+                    if (text.length >= 12) return text;
+                }
+            }
+            return '';
+        };
+        const selectorOf = (el) => {
+            if (!el) return '';
+            if (el.id) return `#${el.id}`;
+            const forAttr = el.getAttribute && el.getAttribute('for');
+            if (forAttr) return `label[for="${forAttr}"]`;
+            return '';
+        };
+        const targetOf = (el) => {
+            if (!el) return '';
+            const direct = selectorOf(el);
+            if (direct) return direct;
+            return textOf(el);
+        };
+        const visibleButtons = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"], a.button, .btn'))
+            .filter(isVisible)
+            .map(textOf)
+            .filter(Boolean)
+            .slice(0, 12);
+        const surveyCards = Array.from(document.querySelectorAll("[id^='survey-'], .survey-item"))
+            .filter(isVisible)
+            .map((el) => {
+                const text = textOf(el);
+                const rewardMatch = text.match(/(\d+[\.,]?\d*)\s*€/);
+                const reward = rewardMatch ? Number(String(rewardMatch[1]).replace(',', '.')) : 0;
+                return {
+                    selector: el.id ? `#${el.id}` : '',
+                    reward,
+                    text,
+                };
+            });
+        surveyCards.sort((a, b) => b.reward - a.reward);
+        const modalSelectors = ['.modal.show', '.modal[style*="display: block"]', '.ReactModal__Content', '.swal-modal', '.modal-dialog', '[role="dialog"]'];
+        const modalRoot = modalSelectors
+            .flatMap((selector) => Array.from(document.querySelectorAll(selector)).filter(isVisible))
+            .find(Boolean) || null;
+        const hasModalOverlay = !!modalRoot;
+        const bodyText = textOf(document.body).slice(0, 4000);
+        const questionText = pickFirstText(['fieldset legend', '.question-text', '.survey-question', '.modal-body p', 'h1', 'h2']);
+        const hasCaptchaWidget = !!document.querySelector('.recaptcha-checkbox, .g-recaptcha, iframe[src*="recaptcha"], .h-captcha, .cf-turnstile, iframe[src*="turnstile"]');
+        const modalButtons = modalRoot
+            ? Array.from(modalRoot.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"], a.button, .btn')).filter(isVisible)
+            : [];
+        const modalNext = modalButtons.find((el) => /nächste|naechste|weiter|next|continue|fortfahren/i.test(textOf(el)));
+        const modalAnswerSelected = modalRoot
+            ? !!modalRoot.querySelector('input[type="radio"]:checked, input[type="checkbox"]:checked, [aria-checked="true"], [aria-selected="true"]')
+            : false;
+        const answerCandidates = modalRoot
+            ? Array.from(modalRoot.querySelectorAll('label, [role="radio"], [role="checkbox"], input[type="radio"], input[type="checkbox"], button, [role="button"]')).filter((el) => {
+                if (!isVisible(el)) return false;
+                if (modalNext && el === modalNext) return false;
+                const txt = textOf(el);
+                if (/nächste|naechste|weiter|next|continue|fortfahren/i.test(txt)) return false;
+                return txt.length >= 2 || !!selectorOf(el);
+            })
+            : [];
+        const modalAnswer = answerCandidates.find(Boolean) || null;
+        return {
+            url: window.location.href,
+            title: document.title || '',
+            body_text: bodyText,
+            question_text: questionText,
+            primary_buttons: visibleButtons,
+            survey_card_count: surveyCards.length,
+            best_survey_selector: surveyCards.length ? surveyCards[0].selector : '',
+            modal_answer_target: targetOf(modalAnswer),
+            modal_next_target: targetOf(modalNext),
+            modal_answer_selected: modalAnswerSelected,
+            has_modal_overlay: hasModalOverlay,
+            has_captcha_widget: hasCaptchaWidget,
+            visible_domains: [window.location.hostname || ''],
+        };
+    })();
+    """
+    try:
+        result = await execute_bridge("execute_javascript", {"script": js_code, **_tab_params()})
+        payload = result.get("result") if isinstance(result, dict) else {}
+        if isinstance(payload, dict):
+            return UiFacts.from_dict(payload)
+    except Exception as exc:
+        audit("ui_facts_error", error=str(exc)[:160])
+    return UiFacts()
+
+
+def _ui_state_to_worker_page_state(state: UiSurfaceState) -> str:
+    mapping = {
+        UiSurfaceState.LOGIN: "login",
+        UiSurfaceState.DASHBOARD_LIST: "dashboard",
+        UiSurfaceState.DASHBOARD_MODAL_SURVEY: "survey_active",
+        UiSurfaceState.CONSENT_SCREEN: "survey",
+        UiSurfaceState.EXTERNAL_SURVEY_QUESTION: "survey_active",
+        UiSurfaceState.CAPTCHA: "captcha",
+    }
+    return mapping.get(state, "unknown")
+
+
+def _decision_from_ui_assessment(assessment, facts: UiFacts | None = None) -> dict[str, object] | None:
+    """Short-circuit deterministic UI states before calling vision."""
+    global _SURVEY_START_PENDING
+
+    if assessment.state == UiSurfaceState.DASHBOARD_LIST and _SURVEY_START_PENDING:
+        return {
+            "verdict": "STOP",
+            "page_state": "dashboard",
+            "reason": "Start-Survey-Modal sprang zurück aufs Dashboard — stoppe fail-closed statt neue Umfragen zu öffnen",
+            "progress": False,
+            "next_action": "none",
+            "next_params": {},
+        }
+
+    if assessment.state == UiSurfaceState.WRONG_LANDING_CASHOUT:
+        return {
+            "verdict": "PROCEED",
+            "page_state": "unknown",
+            "reason": assessment.reason,
+            "progress": True,
+            "next_action": "navigate",
+            "next_params": {"url": WORKER_CONFIG.queue.dashboard_url},
+        }
+
+    if assessment.state == UiSurfaceState.DASHBOARD_LIST and assessment.recommended_action:
+        selector = assessment.recommended_action.target.strip()
+        if selector:
+            return {
+                "verdict": "PROCEED",
+                "page_state": "dashboard",
+                "reason": assessment.reason,
+                "progress": True,
+                "next_action": "click_element",
+                "next_params": {"selector": selector},
+            }
+
+    if assessment.state == UiSurfaceState.DASHBOARD_MODAL_SURVEY and assessment.recommended_action:
+        target = assessment.recommended_action.target.strip()
+        if target:
+            if target == "#start-survey-button":
+                _SURVEY_START_PENDING = True
+            next_action = "click_element" if target.startswith(("#", ".", "[")) else "vision_click"
+            next_params = {"selector": target} if next_action == "click_element" else {"description": target}
+            return {
+                "verdict": "PROCEED",
+                "page_state": "survey_active",
+                "reason": assessment.reason,
+                "progress": True,
+                "next_action": next_action,
+                "next_params": next_params,
+            }
+
+    if assessment.state == UiSurfaceState.CONSENT_SCREEN and assessment.recommended_action:
+        label = assessment.recommended_action.target.strip()
+        if label:
+            return {
+                "verdict": "PROCEED",
+                "page_state": "survey",
+                "reason": assessment.reason,
+                "progress": True,
+                "next_action": "vision_click",
+                "next_params": {"description": label},
+            }
+
+    return None
+
+
+def _merge_ui_assessment_into_decision(decision: dict[str, object], assessment) -> dict[str, object]:
+    """Correct obvious state mismatches between vision output and deterministic UI facts."""
+    merged = dict(decision)
+    worker_state = _ui_state_to_worker_page_state(assessment.state)
+    current_state = str(merged.get("page_state", "unknown") or "unknown")
+
+    if assessment.state == UiSurfaceState.DASHBOARD_MODAL_SURVEY and current_state in {
+        "unknown",
+        "dashboard",
+        "survey",
+    }:
+        merged["page_state"] = worker_state
+        merged["reason"] = f"{merged.get('reason', '')} | UI classifier: {assessment.reason}".strip(" |")
+
+    elif assessment.state == UiSurfaceState.CONSENT_SCREEN and current_state in {"unknown", "dashboard"}:
+        merged["page_state"] = worker_state
+        merged["reason"] = f"{merged.get('reason', '')} | UI classifier: {assessment.reason}".strip(" |")
+
+    elif assessment.state == UiSurfaceState.LOGIN and current_state == "unknown":
+        merged["page_state"] = worker_state
+
+    elif assessment.state == UiSurfaceState.DASHBOARD_LIST and current_state == "unknown":
+        merged["page_state"] = worker_state
+
+    return merged
+
+
+def _is_click_progress_state(assessment) -> bool:
+    """Checks whether the UI state means the click already succeeded."""
+    return assessment.state in {
+        UiSurfaceState.DASHBOARD_MODAL_SURVEY,
+        UiSurfaceState.EXTERNAL_SURVEY_QUESTION,
+        UiSurfaceState.CONSENT_SCREEN,
+    }
+
+
+async def _detect_click_progress_state() -> tuple[bool, str, str]:
+    """Detects if the last click opened the real target instead of doing nothing."""
+    facts = await _collect_ui_facts()
+    assessment = classify_ui_state(facts)
+    if _is_click_progress_state(assessment):
+        return True, assessment.state.value, assessment.reason
+    return False, assessment.state.value, assessment.reason
+
+
 def detect_vision_auth_failure(raw_text: str) -> str | None:
     """
     Erkennt harte Vision-Control-Plane-Blocker im kombinierten Output.
@@ -2105,7 +2342,7 @@ async def run_vision_model(
 async def ensure_worker_preflight() -> dict:
     """
     Prüft die komplette Control-Plane vor der ersten Browser-Mutation.
-    WHY: Issue #86 verlangt ein fail-closed Gate vor tabs_create/navigation/login.
+    WHY: Issue #85 verlangt ein fail-closed Gate vor tabs_create/navigation/login.
     CONSEQUENCES: Fehlt Env oder Vision-Auth, stoppt der Worker bevor ein Tab erstellt wird.
     """
     missing = missing_required_credentials()
@@ -2115,7 +2352,7 @@ async def ensure_worker_preflight() -> dict:
         return {"ok": False, "reason": reason}
 
     # Skip Bridge check if using Playwright driver (Playwright has its own browser!)
-    driver_type = os.environ.get("DRIVER_TYPE", "").lower()
+    driver_type = os.environ.get("DRIVER_TYPE", "playwright").lower()
     if driver_type != "playwright":
         if not await check_bridge_alive():
             reason = "Bridge nicht erreichbar während Preflight"
@@ -2243,7 +2480,7 @@ async def wait_for_extension(timeout=600):
             audit("success", message="Extension verbunden")
             return True
 
-        await asyncio.sleep(5)
+        await asyncio.sleep(min(5.0, 1.0 + (time.time() - start) / 12.0))
 
     raise RuntimeError(f"Timeout ({timeout}s): Bridge Extension nicht verbunden.")
 
@@ -2483,6 +2720,88 @@ async def click_visible_button_with_text(text_hint: str):
     }
 
 
+async def click_visible_choice_with_text(text_hint: str):
+    """Click visible modal choices like radio labels or checkbox rows by text."""
+    tab_params = _tab_params()
+    hint = text_hint.lower().strip()
+    scan = await execute_bridge(
+        "dom.queryAll",
+        {
+            "selector": 'label, button, a, [role="button"], [role="radio"], [role="checkbox"], input[type="radio"], input[type="checkbox"]',
+            **tab_params,
+        },
+    )
+    items = scan.get("items", []) if isinstance(scan, dict) else []
+    if not isinstance(items, list):
+        items = []
+
+    chosen: dict[str, object] | None = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "") or "").strip().lower()
+        selector = str(item.get("selector", "") or "").lower()
+        if text and hint == text:
+            chosen = item
+            break
+        if text and hint in text:
+            chosen = item
+            break
+        if hint and hint in selector:
+            chosen = item
+            break
+
+    if not chosen:
+        return {"clicked": False, "reason": "not found", "hint": hint}
+
+    selected_selector = _prefer_explicit_native_selector(chosen)
+    selected_selector, ref_value = _normalize_selector_and_ref(selected_selector, chosen.get("ref"))
+    display_target = selected_selector or ref_value
+    if ref_value:
+        if not display_target or _is_generic_native_selector(display_target):
+            display_target = ref_value
+        result = await execute_bridge("click_ref", {"ref": ref_value, **tab_params})
+    else:
+        click_args: dict[str, object] = {**tab_params}
+        if selected_selector:
+            click_args["selector"] = selected_selector
+        result = await execute_bridge("dom.click", click_args)
+    return {
+        "clicked": True,
+        "text": str(chosen.get("text", "") or "")[:120],
+        "tag": chosen.get("tag", ""),
+        "selector": display_target,
+        "result": result,
+    }
+
+
+async def click_start_survey_modal_button() -> bool:
+    """Direct JS click for the HeyPiggy start-survey modal CTA."""
+    global _SURVEY_START_PENDING
+    tab_params = _tab_params()
+    js_code = r"""
+    (() => {
+        const el = document.querySelector('#start-survey-button');
+        if (!el) return { ok: false, reason: 'missing' };
+        el.scrollIntoView({ behavior: 'instant', block: 'center' });
+        if (typeof el.focus === 'function') el.focus();
+        if (typeof el.click === 'function') el.click();
+        return {
+            ok: true,
+            text: (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+            id: el.id || ''
+        };
+    })();
+    """
+    result = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
+    payload = result.get("result") if isinstance(result, dict) else None
+    ok = bool(isinstance(payload, dict) and payload.get("ok"))
+    if ok:
+        _SURVEY_START_PENDING = True
+    audit("start_survey_modal_click", ok=ok, result=str(payload)[:160])
+    return ok
+
+
 # ============================================================================
 # CAPTCHA BYPASS — Auto-Erkennung und Behandlung von Captchas (NEU in v3.1)
 # ============================================================================
@@ -2554,7 +2873,9 @@ async def detect_captcha_page() -> bool:
     """
     result = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
     if isinstance(result, dict):
-        return result.get("result", {}).get("found", False)
+        payload = result.get("result")
+        if isinstance(payload, dict):
+            return bool(payload.get("found", False))
     return False
 
 
@@ -2593,7 +2914,6 @@ async def handle_captcha() -> bool:
                         await execute_bridge(
                             "dom.click", {"selector": target_selector, **tab_params}
                         )
-                await asyncio.sleep(3 + random.random() * 3)
                 return True
 
             btn_scan = await execute_bridge(
@@ -2615,7 +2935,6 @@ async def handle_captcha() -> bool:
                             await execute_bridge(
                                 "dom.click", {"selector": btn_selector, **tab_params}
                             )
-                        await asyncio.sleep(3 + random.random() * 3)
                         return True
         except Exception as e:
             audit("captcha_handle_error_v2", error=str(e))
@@ -2656,7 +2975,6 @@ async def handle_captcha() -> bool:
     if isinstance(result, dict):
         r = result.get("result", {})
         if r.get("clicked") or r.get("refreshed"):
-            await asyncio.sleep(3 + random.random() * 3)
             return True
     return False
 
@@ -2673,7 +2991,15 @@ async def resolve_survey_selector(selector: str, description: str = "") -> str:
         return selector
 
     lowered = selector.lower()
-    if "survey-item" not in lowered and "survey" not in lowered:
+    looks_like_survey_card = (
+        lowered.startswith("#survey-")
+        or "survey-item" in lowered
+        or "survey-card" in lowered
+        or "[data-survey-id" in lowered
+        or "[id^='survey-']" in lowered
+        or '[id^="survey-"]' in lowered
+    )
+    if not looks_like_survey_card:
         return selector
 
     global CURRENT_TAB_ID, CURRENT_WINDOW_ID
@@ -3017,7 +3343,7 @@ async def _execute_via_driver(driver: BrowserDriver, method: str, params: dict) 
 
         elif method == "execute_javascript" or method == "javascript" or method == "execute_script":
             # JavaScript ausführen
-            script = params.get("script", "")
+            script = sanitize_js_for_cdp(str(params.get("script", "") or ""))
             result = await driver.execute_javascript(script, tab_id)
             return {"result": result.result, "error": result.error}
 
@@ -3192,12 +3518,15 @@ async def check_bridge_alive():
 
     audit("state_change", message="Bridge disconnected! Versuche Reconnect...")
     start = time.time()
+    attempt = 0
     while time.time() - start < 60:
-        await asyncio.sleep(5)
+        delay = min(5.0, 1.0 + attempt * 0.75)
+        await asyncio.sleep(delay)
         health = await asyncio.to_thread(fetch_health)
         if health.get("extensionConnected") is True:
             audit("success", message="Bridge reconnected!")
             return True
+        attempt += 1
 
     audit("error", message="Bridge Reconnect fehlgeschlagen nach 60s")
     return False
@@ -5510,43 +5839,18 @@ async def keyboard_action(keys: list, selector: str = ""):
 
     Unterstützte Keys: Tab, Enter, Space, ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Escape
     """
-    global CURRENT_TAB_ID, CURRENT_WINDOW_ID
     tab_params = _tab_params()
     selector = normalize_selector(selector)
-
-    # Mapping von Key-Namen zu KeyboardEvent-Properties
-    key_map = {
-        "Tab": {"key": "Tab", "code": "Tab", "keyCode": 9},
-        "Enter": {"key": "Enter", "code": "Enter", "keyCode": 13},
-        "Space": {"key": " ", "code": "Space", "keyCode": 32},
-        "Escape": {"key": "Escape", "code": "Escape", "keyCode": 27},
-        "ArrowDown": {"key": "ArrowDown", "code": "ArrowDown", "keyCode": 40},
-        "ArrowUp": {"key": "ArrowUp", "code": "ArrowUp", "keyCode": 38},
-        "ArrowLeft": {"key": "ArrowLeft", "code": "ArrowLeft", "keyCode": 37},
-        "ArrowRight": {"key": "ArrowRight", "code": "ArrowRight", "keyCode": 39},
-    }
-
-    results = []
-    for key_name in keys:
-        kp = key_map.get(key_name, {"key": key_name, "code": key_name, "keyCode": 0})
-        try:
-            if selector:
-                try:
-                    await execute_bridge("dom.focus", {"selector": selector, **tab_params})
-                except Exception:
-                    pass
-            try:
-                result = await execute_bridge("dom.press", {"key": kp["key"], **tab_params})
-            except Exception:
-                result = await execute_bridge("dom.press", {"keys": [kp["key"]], **tab_params})
-            audit("keyboard", key=key_name, result=str(result)[:150])
-            results.append(result)
-            # Kurze Pause zwischen Tasten wie ein Mensch
-            await asyncio.sleep(0.15 + random.random() * 0.25)
-        except Exception as e:
-            audit("error", message=f"Keyboard {key_name} failed: {e}")
-            results.append({"error": str(e)})
-
+    results = await press_keys_with_human_cadence(
+        execute_bridge,
+        list(keys),
+        tab_params=tab_params,
+        selector=selector,
+        min_delay_sec=0.15,
+        max_delay_sec=0.4,
+    )
+    for key_name, result in zip(keys, results, strict=False):
+        audit("keyboard", key=key_name, result=str(result)[:150])
     return results
 
 
@@ -5579,11 +5883,13 @@ async def dom_verify_change(before_url: str, before_title: str):
         current_url, current_title, _status = _page_info_fields(page_info)
 
         if not current_url and not current_title:
-            # Tab may still be loading — wait briefly and retry once with same tabId
-            # NEVER switch to a different tab or recover to a new one here
-            await asyncio.sleep(1.5)
-            page_info = await execute_bridge("get_page_info", tab_params)
-            current_url, current_title, _status = _page_info_fields(page_info)
+            # Tab may still be loading — retry a few short probes with the same tabId.
+            # NEVER switch to a different tab or recover to a new one here.
+            deadline = time.monotonic() + 1.5
+            while time.monotonic() < deadline and not current_url and not current_title:
+                await asyncio.sleep(0.25)
+                page_info = await execute_bridge("get_page_info", tab_params)
+                current_url, current_title, _status = _page_info_fields(page_info)
 
         url_changed = current_url != before_url
         title_changed = current_title != before_title
@@ -5743,7 +6049,24 @@ async def escalating_click(
                 if isinstance(result, dict) and result.get("error"):
                     audit("error", message=f"click_ref failed: {result['error']}")
                 else:
-                    await asyncio.sleep(0.8)
+                    click_progress, click_state, click_reason = await _detect_click_progress_state()
+                    if click_progress:
+                        audit(
+                            "click_progress",
+                            method="click_ref",
+                            state=click_state,
+                            reason=click_reason,
+                        )
+                        return True
+                    dom_change = await dom_verify_change(before_url, before_title)
+                    if dom_change.get("changed"):
+                        audit(
+                            "click_progress",
+                            method="click_ref",
+                            state="dom_changed",
+                            reason=str(dom_change.get("current_url") or dom_change.get("current_title") or "DOM changed"),
+                        )
+                        return True
                     esc_decision = await _vision_gate_inside_escalation(
                         f"after_click_ref_{i}",
                         f"click_ref auf {ref[:60]}",
@@ -5764,7 +6087,24 @@ async def escalating_click(
                 if isinstance(result, dict) and result.get("error"):
                     audit("error", message=f"click_element failed: {result['error']}")
                 else:
-                    await asyncio.sleep(0.8)
+                    click_progress, click_state, click_reason = await _detect_click_progress_state()
+                    if click_progress:
+                        audit(
+                            "click_progress",
+                            method="click_element",
+                            state=click_state,
+                            reason=click_reason,
+                        )
+                        return True
+                    dom_change = await dom_verify_change(before_url, before_title)
+                    if dom_change.get("changed"):
+                        audit(
+                            "click_progress",
+                            method="click_element",
+                            state="dom_changed",
+                            reason=str(dom_change.get("current_url") or dom_change.get("current_title") or "DOM changed"),
+                        )
+                        return True
                     esc_decision = await _vision_gate_inside_escalation(
                         f"after_click_element_{i}",
                         f"click_element auf {selector[:60]}",
@@ -5815,7 +6155,24 @@ async def escalating_click(
                 if isinstance(result, dict) and result.get("error"):
                     audit("error", message=f"ghost_click failed: {result['error']}")
                 else:
-                    await asyncio.sleep(0.8)
+                    click_progress, click_state, click_reason = await _detect_click_progress_state()
+                    if click_progress:
+                        audit(
+                            "click_progress",
+                            method="ghost_click",
+                            state=click_state,
+                            reason=click_reason,
+                        )
+                        return True
+                    dom_change = await dom_verify_change(before_url, before_title)
+                    if dom_change.get("changed"):
+                        audit(
+                            "click_progress",
+                            method="ghost_click",
+                            state="dom_changed",
+                            reason=str(dom_change.get("current_url") or dom_change.get("current_title") or "DOM changed"),
+                        )
+                        return True
                     esc_decision = await _vision_gate_inside_escalation(
                         f"after_ghost_click_{i}",
                         f"ghost_click auf {sel[:60]}",
@@ -5850,9 +6207,25 @@ async def escalating_click(
                     "execute_javascript", {"script": focus_js, **tab_params}
                 )
                 audit("keyboard", action="focus", result=str(focus_result)[:150])
-                await asyncio.sleep(0.3)
                 await keyboard_action(["Enter"], selector=sel)
-                await asyncio.sleep(0.8)
+                click_progress, click_state, click_reason = await _detect_click_progress_state()
+                if click_progress:
+                    audit(
+                        "click_progress",
+                        method="keyboard_enter",
+                        state=click_state,
+                        reason=click_reason,
+                    )
+                    return True
+                dom_change = await dom_verify_change(before_url, before_title)
+                if dom_change.get("changed"):
+                    audit(
+                        "click_progress",
+                        method="keyboard_enter",
+                        state="dom_changed",
+                        reason=str(dom_change.get("current_url") or dom_change.get("current_title") or "DOM changed"),
+                    )
+                    return True
                 esc_decision = await _vision_gate_inside_escalation(
                     f"after_keyboard_enter_{i}",
                     f"keyboard Enter auf {sel[:60]}",
@@ -5867,7 +6240,24 @@ async def escalating_click(
                 if esc_decision.get("verdict") == "PROCEED":
                     return True
                 await keyboard_action(["Space"], selector=sel)
-                await asyncio.sleep(0.8)
+                click_progress, click_state, click_reason = await _detect_click_progress_state()
+                if click_progress:
+                    audit(
+                        "click_progress",
+                        method="keyboard_space",
+                        state=click_state,
+                        reason=click_reason,
+                    )
+                    return True
+                dom_change = await dom_verify_change(before_url, before_title)
+                if dom_change.get("changed"):
+                    audit(
+                        "click_progress",
+                        method="keyboard_space",
+                        state="dom_changed",
+                        reason=str(dom_change.get("current_url") or dom_change.get("current_title") or "DOM changed"),
+                    )
+                    return True
                 esc_decision2 = await _vision_gate_inside_escalation(
                     f"after_keyboard_space_{i}",
                     f"keyboard Space auf {sel[:60]}",
@@ -5888,7 +6278,24 @@ async def escalating_click(
                 if isinstance(result, dict) and result.get("error"):
                     audit("error", message=f"vision_click failed: {result['error']}")
                 else:
-                    await asyncio.sleep(0.8)
+                    click_progress, click_state, click_reason = await _detect_click_progress_state()
+                    if click_progress:
+                        audit(
+                            "click_progress",
+                            method="vision_click",
+                            state=click_state,
+                            reason=click_reason,
+                        )
+                        return True
+                    dom_change = await dom_verify_change(before_url, before_title)
+                    if dom_change.get("changed"):
+                        audit(
+                            "click_progress",
+                            method="vision_click",
+                            state="dom_changed",
+                            reason=str(dom_change.get("current_url") or dom_change.get("current_title") or "DOM changed"),
+                        )
+                        return True
                     esc_decision = await _vision_gate_inside_escalation(
                         f"after_vision_click_{i}",
                         f"vision_click '{description[:40]}'",
@@ -5930,7 +6337,24 @@ async def escalating_click(
                 if isinstance(result, dict) and result.get("error"):
                     audit("error", message=f"coord_click failed: {result}")
                 else:
-                    await asyncio.sleep(0.8)
+                    click_progress, click_state, click_reason = await _detect_click_progress_state()
+                    if click_progress:
+                        audit(
+                            "click_progress",
+                            method="click_coordinates",
+                            state=click_state,
+                            reason=click_reason,
+                        )
+                        return True
+                    dom_change = await dom_verify_change(before_url, before_title)
+                    if dom_change.get("changed"):
+                        audit(
+                            "click_progress",
+                            method="click_coordinates",
+                            state="dom_changed",
+                            reason=str(dom_change.get("current_url") or dom_change.get("current_title") or "DOM changed"),
+                        )
+                        return True
                     esc_decision = await _vision_gate_inside_escalation(
                         f"after_coord_click_{i}",
                         f"coord_click ({cx},{cy})",
@@ -5954,6 +6378,13 @@ async def escalating_click(
     # WHY: vision_click oder andere Methoden können durch Rate-Limit oder komplexe Modals blockiert werden.
     # Ein simpler sichtbarer Button mit Text (z.B. "Nächste", "Weiter") umgeht Vision komplett.
     if description:
+        audit(
+            "action",
+            message=f"DOM-Fallback: Versuche click_visible_choice_with_text('{description[:40]}')",
+        )
+        choice_result = await click_visible_choice_with_text(description)
+        if choice_result.get("clicked"):
+            return True
         audit(
             "action",
             message=f"DOM-Fallback: Versuche click_visible_button_with_text('{description[:40]}')",
@@ -6392,7 +6823,10 @@ async def attempt_google_login(email: str) -> dict:
     return {found: false};
 })();
 """
-        scan = await execute_bridge("execute_javascript", {"script": google_btn_js, **tab_params})
+        scan = await execute_bridge(
+            "execute_javascript",
+            {"script": sanitize_js_for_cdp(google_btn_js), **tab_params},
+        )
         found_data = {}
         if isinstance(scan, dict):
             found_data = scan.get("result", {}) or {}
@@ -6426,7 +6860,10 @@ async def attempt_google_login(email: str) -> dict:
     return {clicked: false};
 })();
 """
-        await execute_bridge("execute_javascript", {"script": click_js, **tab_params})
+        await execute_bridge(
+            "execute_javascript",
+            {"script": sanitize_js_for_cdp(click_js), **tab_params},
+        )
         await human_delay(3.0, 5.0)
 
         # Google Account-Picker: Das richtige Profil wählen
@@ -6454,7 +6891,8 @@ async def attempt_google_login(email: str) -> dict:
 """
         await human_delay(1.5, 3.0)
         account_result = await execute_bridge(
-            "execute_javascript", {"script": account_js, **tab_params}
+            "execute_javascript",
+            {"script": sanitize_js_for_cdp(account_js), **tab_params},
         )
         audit("google_account_picker", result=str(account_result)[:120])
 
@@ -6529,7 +6967,7 @@ async def handle_scroll(direction: str):
 async def run_click_action(next_params: dict, gate, img_hash: str, step_num: int) -> bool:
     """
     Leitet alle Click-Aktionen durch genau EINE verifizierte Eskalationspipeline.
-    WHY: Issue #86 verlangt, dass `click_ref` keinen direkten Bridge-Bypass mehr hat.
+    WHY: Issue #85 verlangt, dass `click_ref` keinen direkten Bridge-Bypass mehr hat.
     CONSEQUENCES: Jeder Click-Entry-Point läuft hier zentral durch `escalating_click()`.
     """
     selector = next_params.get("selector", "")
@@ -6543,6 +6981,19 @@ async def run_click_action(next_params: dict, gate, img_hash: str, step_num: int
     # normalen Click-Eskalation in `ref` umgewandelt werden.
     selector, ref = _normalize_selector_and_ref(selector, ref)
     failure_target = ref or selector
+
+    if selector == "#start-survey-button":
+        clicked = await click_start_survey_modal_button()
+        if not clicked:
+            gate.add_failed_selector(selector)
+            audit("error", message="Start-Survey-Modal-Button Klick fehlgeschlagen")
+        return clicked
+
+    if description and not selector and not ref and x is None and y is None:
+        clicked_choice = await click_visible_choice_with_text(description)
+        if clicked_choice.get("clicked"):
+            audit("choice_click", target=description[:80], result=str(clicked_choice.get("result", ""))[:160])
+            return True
 
     if failure_target and gate.is_selector_failed(failure_target):
         audit(
@@ -6824,15 +7275,21 @@ async def main():
         budget_max_eur=BUDGET_GUARD.max_eur or None,
     )
 
-    # 1. BRIDGE-VERBINDUNG PRÜFEN
-    try:
-        await wait_for_extension(timeout=BRIDGE_CONNECT_TIMEOUT)
-    except Exception as e:
-        final_exit_reason = f"bridge_connect_failed: {e}"
-        run_summary.bridge_errors += 1
-        await _finalize_worker_run(run_summary, gate, final_exit_reason, final_page_state, recorder)
-        audit("stop", reason=f"Bridge-Verbindung fehlgeschlagen: {e}")
-        return
+    # 1. LEGACY-BRIDGE-GATE
+    # WHY: Der Playwright-Standardpfad darf nicht mehr auf eine Bridge warten.
+    # CONSEQUENCES: Nur expliziter Bridge-Modus blockiert hier noch auf die Extension.
+    driver_type = os.environ.get("DRIVER_TYPE", "playwright").lower()
+    if driver_type != "playwright":
+        try:
+            await wait_for_extension(timeout=BRIDGE_CONNECT_TIMEOUT)
+        except Exception as e:
+            final_exit_reason = f"bridge_connect_failed: {e}"
+            run_summary.bridge_errors += 1
+            await _finalize_worker_run(run_summary, gate, final_exit_reason, final_page_state, recorder)
+            audit("stop", reason=f"Bridge-Verbindung fehlgeschlagen: {e}")
+            return
+    else:
+        audit("state_change", message="Playwright driver aktiv; Bridge-Wait übersprungen")
 
     # 2. PRE-FLIGHT — Pflicht-Env + Vision-Auth müssen VOR Browser-Mutation healthy sein
     # SKIP_PREFLIGHT=1 umgeht den Vision-Probe (nuetzlich wenn Auth noch nicht ready)
@@ -7218,7 +7675,7 @@ async def main():
     # uns als "haeufige Neu-Logins" markieren (Trust-Score-Abwertung).
 
     # Skip session restore when using Playwright - Playwright has its own session!
-    driver_type = os.environ.get("DRIVER_TYPE", "").lower()
+    driver_type = os.environ.get("DRIVER_TYPE", "playwright").lower()
     if driver_type != "playwright":
         try:
             # WHY: target_url kommt jetzt aus dem aktiven Platform-Profil damit der
@@ -7304,7 +7761,7 @@ async def main():
                     last_url = url
             except Exception:
                 pass
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(min(1.0, 0.25 + same_streak * 0.25))
         return last_url
 
     try:
@@ -7385,8 +7842,23 @@ async def main():
         delay_min, delay_max = get_fail_learning_delay_bounds(5.0, 10.0)
         await human_delay(delay_min, delay_max)
 
+        ui_facts = await _collect_ui_facts()
+        ui_assessment = classify_ui_state(ui_facts)
+        deterministic_decision = _decision_from_ui_assessment(ui_assessment, ui_facts)
+
         # ---- VISION CHECK ----
-        decision = await ask_vision(img_path, action_desc, expected, current_step)
+        if deterministic_decision is not None:
+            decision = deterministic_decision
+            audit(
+                "ui_state_guided_decision",
+                step=current_step,
+                state=ui_assessment.state.value,
+                action=decision.get("next_action", "none"),
+                reason=ui_assessment.reason,
+            )
+        else:
+            decision = await ask_vision(img_path, action_desc, expected, current_step)
+            decision = _merge_ui_assessment_into_decision(decision, ui_assessment)
 
         verdict = decision.get("verdict", "RETRY")
         reason = decision.get("reason", "Kein Grund")
@@ -7539,6 +8011,7 @@ async def main():
         # oder die Rückkehr zum Dashboard selbst erkennt und navigiert.
         # WARNUNG: Hier kein "break"! Abbrechen würde weitere ausstehende Surveys verpassen.
         if page_state == "survey_done":
+            _SURVEY_START_PENDING = False
             # DQ-Erkennung: reason enthaelt "disqualif" ODER der letzte
             # Screener-Trigger war positiv UND wir haben keinen EUR-Reward
             # gesehen. Bei echten Completes erscheint immer ein Reward-Banner.
@@ -7800,43 +8273,19 @@ async def main():
                 selector, ref = _normalize_selector_and_ref(selector, ref)
                 params["selector"] = selector
                 params["ref"] = ref
-                # Fokus setzen
-                if ref:
-                    await execute_bridge("click_ref", {"ref": ref, **_tab_params()})
-                    await asyncio.sleep(0.4 + random.random() * 0.3)
-                elif selector:
-                    # Normaler CSS-Selektor: erst click dann tippen
-                    try:
-                        await execute_bridge("click", {"selector": selector, **_tab_params()})
-                        await asyncio.sleep(0.3 + random.random() * 0.3)
-                    except Exception:
-                        pass
-                # Human-cadence per-char
-                if text and len(text) <= 400:
-                    for idx, ch in enumerate(text):
-                        try:
-                            await execute_bridge("keyboard", {"keys": [ch], **_tab_params()})
-                        except Exception:
-                            # Fallback auf ganzes type_text falls keyboard-Einzelchar fehlschlaegt
-                            await execute_bridge("type_text", params)
-                            break
-                        # Jitter: 40-180ms, bei Satzzeichen leicht laenger, 3% Chance auf Mikro-Pause
-                        base = 0.04 + random.random() * 0.14
-                        if ch in ".,!?;:":
-                            base += 0.12 + random.random() * 0.18
-                        if ch == " " and random.random() < 0.05:
-                            base += 0.25 + random.random() * 0.35
-                        if random.random() < 0.03:
-                            base += 0.45 + random.random() * 0.6
-                        await asyncio.sleep(base)
+                typed_result = await type_text_with_human_cadence(
+                    execute_bridge,
+                    text,
+                    tab_params=_tab_params(),
+                    selector=selector,
+                    ref=ref,
+                )
+                if typed_result.get("mode") == "keyboard":
                     audit(
                         "human_typed",
-                        chars=len(text),
+                        chars=typed_result.get("typed", len(text)),
                         avg_ms_per_char=round(1000 * 0.1, 0),
                     )
-                else:
-                    # Sehr lange Texte ODER leer -> single bridge call
-                    await execute_bridge("type_text", params)
 
             # Navigation — IMMER mit exaktem tabId, KEIN Fallback ohne tabId
             elif next_action == "navigate":
