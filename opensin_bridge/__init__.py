@@ -26,7 +26,7 @@ from opensin_bridge.contract import (
     is_idempotent,
     retry_hint_for,
 )
-from opensin_bridge.adapter import BridgeAdapter, BridgeCallResult
+from opensin_bridge.adapter import BridgeAdapter, BridgeCallResult, configure_adapter
 
 __all__ = [
     "BRIDGE_CONTRACT_VERSION",
@@ -38,6 +38,7 @@ __all__ = [
     "ERROR_CODES",
     "METHODS",
     "classify_error",
+    "configure_adapter",
     "is_idempotent",
     "retry_hint_for",
 ]
