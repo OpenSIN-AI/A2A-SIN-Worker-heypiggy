@@ -129,6 +129,8 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
 
     key = normalize_env_key(key)
     value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
     if value in {'""', "''", ""}:
         # WHY: Infisical requires a non-empty value in the import file; we use
         # a sentinel that keeps the key present and can be interpreted by the
@@ -147,6 +149,33 @@ def parse_env_text(text: str) -> dict[str, str]:
         key, value = parsed
         mapping[key] = value
     return mapping
+
+
+def export_env_from_infisical(
+    *,
+    project_id: str,
+    environment: str,
+    folder_root: str,
+    domain: str = "https://eu.infisical.com",
+) -> dict[str, str]:
+    """Export a full secret snapshot from Infisical as KEY=VALUE pairs.
+
+    WHY: Startup bootstrapping should read from the canonical vault directly,
+    so the worker can populate missing runtime env vars before config validation.
+    """
+    cmd = [
+        "infisical",
+        "export",
+        f"--domain={domain}",
+        f"--projectId={project_id}",
+        f"--env={environment}",
+        f"--path={folder_root}",
+        "--format=dotenv-export",
+    ]
+    env = os.environ.copy()
+    env.setdefault("INFISICAL_API_URL", domain)
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
+    return parse_env_text(result.stdout)
 
 
 def normalize_env_file(source: Path) -> NormalizedEnvFile:
@@ -512,6 +541,7 @@ __all__ = [
     "DriftReport",
     "discover_default_roots",
     "parse_env_text",
+    "export_env_from_infisical",
     "normalize_env_file",
     "sync_env_file_to_infisical",
     "sync_roots",

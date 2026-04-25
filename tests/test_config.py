@@ -16,6 +16,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+import config as config_module
+
 from config import (
     ArtifactConfig,
     BridgeConfig,
@@ -269,3 +271,81 @@ class LoadConfigFromEnvTests(unittest.TestCase):
 
         self.assertEqual(cfg.nvidia.api_key, "nvapi-saved")
         self.assertEqual(cfg.bridge.mcp_url, "https://bridge.saved/mcp")
+
+    def test_saved_env_files_require_explicit_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_root = root / "repo"
+            home_root = root / "home"
+            repo_root.mkdir()
+            home_root.mkdir()
+
+            (repo_root / ".env").write_text(
+                "\n".join(
+                    [
+                        'export HEYPIGGY_EMAIL="repo@example.com"',
+                        'export HEYPIGGY_PASSWORD="repo-password"',
+                        'export NVIDIA_API_KEY="nvapi-repo"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (home_root / ".env").write_text(
+                "\n".join(
+                    [
+                        'export HEYPIGGY_EMAIL="home@example.com"',
+                        'export HEYPIGGY_PASSWORD="home-password"',
+                        'export NVIDIA_API_KEY="nvapi-home"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(config_module, "__file__", str(repo_root / "config.py")):
+                with patch.object(config_module.Path, "home", return_value=home_root):
+                    with patch.dict(os.environ, {"HEYPIGGY_DISABLE_SAVED_ENV": "0"}, clear=True):
+                        loaded = config_module.ensure_saved_env_loaded()
+                        self.assertFalse(loaded)
+                        self.assertNotIn("HEYPIGGY_EMAIL", os.environ)
+
+                    with patch.dict(
+                        os.environ,
+                        {
+                            "HEYPIGGY_DISABLE_SAVED_ENV": "0",
+                            "HEYPIGGY_ALLOW_SAVED_ENV": "1",
+                        },
+                        clear=True,
+                    ):
+                        loaded = config_module.ensure_saved_env_loaded()
+                        self.assertTrue(loaded)
+                        self.assertEqual(os.environ["HEYPIGGY_EMAIL"], "repo@example.com")
+                        self.assertEqual(os.environ["HEYPIGGY_PASSWORD"], "repo-password")
+                        self.assertEqual(os.environ["NVIDIA_API_KEY"], "nvapi-repo")
+
+    def test_worker_env_loader_pulls_from_infisical_when_enabled(self):
+        with patch.dict(
+            os.environ,
+            {
+                "HEYPIGGY_DISABLE_SAVED_ENV": "1",
+                "INFISICAL_AUTO_PULL": "1",
+                "INFISICAL_ENABLED": "1",
+                "INFISICAL_DOMAIN": "https://eu.infisical.com",
+                "INFISICAL_PROJECT_ID": "fa7758b4-f84c-4297-966e-710056d531ef",
+                "INFISICAL_ENV": "dev",
+                "INFISICAL_FOLDER_ROOT": "/opensin/a2a-sin-worker-heypiggy",
+            },
+            clear=True,
+        ):
+            with patch(
+                "infisical_sync.export_env_from_infisical",
+                return_value={
+                    "NVIDIA_API_KEY": "nvapi-from-infisical",
+                    "HEYPIGGY_EMAIL": "agent@example.com",
+                    "HEYPIGGY_PASSWORD": "secret-from-infisical",
+                },
+            ):
+                loaded = config_module.ensure_worker_env_loaded()
+                self.assertTrue(loaded)
+                self.assertEqual(os.environ["NVIDIA_API_KEY"], "nvapi-from-infisical")
+                self.assertEqual(os.environ["HEYPIGGY_EMAIL"], "agent@example.com")
+                self.assertEqual(os.environ["HEYPIGGY_PASSWORD"], "secret-from-infisical")

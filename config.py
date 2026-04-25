@@ -63,9 +63,10 @@ def _parse_env_file(path: Path) -> dict[str, str]:
 def ensure_saved_env_loaded() -> bool:
     """Lädt persistierte Worker-ENV-Werte aus gespeicherten .env-Dateien.
 
-    WHY: Die HeyPiggy-Runs müssen ohne manuelles Nachfragen mit den lokal
-    gespeicherten Zugangsdaten laufen. Priorität: explizite HEYPIGGY_ENV_FILE
-    -> Repo-.env -> ~/.env. Setzt vorhandene Werte bewusst überschreibend.
+    WHY: Produktion soll Secrets aus einer expliziten Runtime-Quelle beziehen,
+         nicht stillschweigend aus lokalen .env-Dateien. Explizite
+         ``HEYPIGGY_ENV_FILE``-Pfade bleiben erlaubt; repo-/home-.env werden
+         nur geladen, wenn ``HEYPIGGY_ALLOW_SAVED_ENV=1`` gesetzt ist.
     """
     if _is_truthy(os.environ.get("HEYPIGGY_DISABLE_SAVED_ENV")):
         return False
@@ -73,8 +74,11 @@ def ensure_saved_env_loaded() -> bool:
     repo_env = Path(__file__).resolve().parent / ".env"
     home_env = Path.home() / ".env"
     explicit_env_file = os.environ.get("HEYPIGGY_ENV_FILE", "").strip()
+    allow_saved_env = _is_truthy(os.environ.get("HEYPIGGY_ALLOW_SAVED_ENV"))
 
-    candidates: list[Path] = [home_env, repo_env]
+    candidates: list[Path] = []
+    if allow_saved_env:
+        candidates.extend([home_env, repo_env])
     if explicit_env_file:
         candidates.append(Path(explicit_env_file).expanduser())
 
@@ -90,6 +94,57 @@ def ensure_saved_env_loaded() -> bool:
             os.environ[key] = value
 
     return loaded_any
+
+
+def ensure_infisical_env_loaded(*, overwrite: bool = False) -> bool:
+    """Lädt Secrets aus Infisical in die aktuelle Prozess-ENV.
+
+    WHY: Wenn die Runtime-ENV fehlende Werte hat, soll der Worker sie direkt
+         aus dem canonical vault ziehen, bevor Validierung oder Preflight
+         falsche "missing"-Aussagen produziert.
+    """
+    if not _is_truthy(os.environ.get("INFISICAL_ENABLED", "1")):
+        return False
+    if not _is_truthy(os.environ.get("INFISICAL_AUTO_PULL", "1")):
+        return False
+
+    domain = os.environ.get("INFISICAL_DOMAIN", InfisicalConfig.domain)
+    project_id = os.environ.get("INFISICAL_PROJECT_ID", InfisicalConfig.project_id)
+    environment = os.environ.get("INFISICAL_ENV", InfisicalConfig.environment)
+    folder_root = os.environ.get("INFISICAL_FOLDER_ROOT", InfisicalConfig.folder_root)
+
+    try:
+        from infisical_sync import export_env_from_infisical
+    except Exception:
+        return False
+
+    try:
+        snapshot = export_env_from_infisical(
+            project_id=project_id,
+            environment=environment,
+            folder_root=folder_root,
+            domain=domain,
+        )
+    except Exception:
+        return False
+
+    loaded_any = False
+    for key, value in snapshot.items():
+        if overwrite or not os.environ.get(key):
+            os.environ[key] = value
+            loaded_any = True
+    return loaded_any
+
+
+def ensure_worker_env_loaded() -> bool:
+    """Load local saved env first, then canonical Infisical secrets.
+
+    WHY: The worker should prefer the vault as the source of truth, while still
+         allowing a local saved env snapshot to fill non-canonical dev gaps.
+    """
+    loaded_local = ensure_saved_env_loaded()
+    loaded_remote = ensure_infisical_env_loaded()
+    return loaded_local or loaded_remote
 
 
 @dataclass(frozen=True)
@@ -413,7 +468,7 @@ def load_config_from_env() -> WorkerConfig:
     ENV-Variablen sind der Standard für containerisierte Konfiguration.
     CONSEQUENCES: Defaults greifen wenn ENV nicht gesetzt. Keine harten Crashes.
     """
-    ensure_saved_env_loaded()
+    ensure_worker_env_loaded()
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     fallback_models_env = os.environ.get("NVIDIA_FALLBACK_MODELS", "")
     fallback_models = NvidiaConfig.fallback_models

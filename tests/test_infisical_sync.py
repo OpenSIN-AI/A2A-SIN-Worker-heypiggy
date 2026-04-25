@@ -5,6 +5,7 @@ from global_brain_client import GlobalBrainClient
 from global_brain_policy import InfisicalTarget
 from infisical_sync import (
     discover_default_roots,
+    export_env_from_infisical,
     normalize_env_file,
     parse_env_text,
     sync_env_file_to_infisical,
@@ -83,3 +84,28 @@ def test_sync_env_file_to_infisical_ingests_brain_facts(tmp_path: Path, monkeypa
 
     assert result.brain_facts == 1
     assert fake_brain.ingest.await_count == 1
+
+
+def test_export_env_from_infisical_parses_dotenv_export(monkeypatch):
+    class Result:
+        stdout = 'export FOO=bar\nBAR="baz"\n'
+
+    captured = {}
+
+    def fake_run(cmd, check, capture_output, text, env):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        return Result()
+
+    monkeypatch.setattr("infisical_sync.subprocess.run", fake_run)
+
+    snapshot = export_env_from_infisical(
+        project_id="proj-1",
+        environment="dev",
+        folder_root="/opensin/test",
+        domain="https://eu.infisical.com",
+    )
+
+    assert snapshot == {"FOO": "bar", "BAR": "baz"}
+    assert captured["cmd"][:2] == ["infisical", "export"]
+    assert captured["env"]["INFISICAL_API_URL"] == "https://eu.infisical.com"

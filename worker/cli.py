@@ -50,6 +50,24 @@ _EXIT_WORKER_ERROR: Final[int] = 4
 _EXIT_INTERRUPTED: Final[int] = 130  # 128 + SIGINT
 
 
+def _is_truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _bridge_adapter_mode() -> str:
+    """Describe which bridge adapter path is currently active.
+
+    WHY: The operator should see whether the new adapter is explicitly opted in
+    or the legacy path is still in use before starting the worker.
+    """
+    explicit = os.environ.get("BRIDGE_ADAPTER", "").strip().lower()
+    if explicit in {"opensin", "legacy"}:
+        return explicit
+    if _is_truthy(os.environ.get("OPENSIN_BRIDGE_V2")) or _is_truthy(os.environ.get("OPENSIN_V2")):
+        return "opensin"
+    return "legacy"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="heypiggy-worker",
@@ -276,9 +294,9 @@ def _run_worker(args: argparse.Namespace, log: BoundLogger) -> int:
 
 def _run_doctor(log: BoundLogger) -> int:
     """Print a sanity report: version, required env vars, optional deps."""
-    from config import ensure_saved_env_loaded
+    from config import ensure_worker_env_loaded
 
-    ensure_saved_env_loaded()
+    ensure_worker_env_loaded()
     required_env = ("NVIDIA_API_KEY", "HEYPIGGY_EMAIL", "HEYPIGGY_PASSWORD")
     missing = [name for name in required_env if not os.environ.get(name)]
 
@@ -309,6 +327,7 @@ def _run_doctor(log: BoundLogger) -> int:
         "python": sys.version.split()[0],
         "platform": sys.platform,
         "missing_env": missing,
+        "bridge_adapter_mode": _bridge_adapter_mode(),
         "infisical": infisical_env,
         "modules": modules,
     }
@@ -321,6 +340,7 @@ def _run_doctor(log: BoundLogger) -> int:
         print(f"  missing required env: {', '.join(missing)}")
     else:
         print("  required env: ok")
+    print(f"  bridge_adapter_mode: {report['bridge_adapter_mode']}")
     print("  infisical:")
     for name, present in infisical_env.items():
         print(f"    {name}: {'ok' if present else 'missing'}")

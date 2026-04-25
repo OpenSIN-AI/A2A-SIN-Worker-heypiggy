@@ -45,11 +45,15 @@ def test_doctor_ok_when_env_set(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NVIDIA_API_KEY", "x")
     monkeypatch.setenv("HEYPIGGY_EMAIL", "x@example.com")
     monkeypatch.setenv("HEYPIGGY_PASSWORD", "x")
+    monkeypatch.setenv("BRIDGE_ADAPTER", "opensin")
 
-    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+    out = io.StringIO()
+    err = io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
         rc = main(["doctor"])
 
     assert rc == 0
+    assert "bridge_adapter_mode: opensin" in (out.getvalue() + err.getvalue())
 
 
 def test_unknown_subcommand_exits_nonzero() -> None:
