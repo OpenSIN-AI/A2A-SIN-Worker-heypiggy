@@ -15,5 +15,16 @@ from opensin_runtime.state_machine import (
     StateTransition,
     IllegalTransition,
 )
+from opensin_runtime.ui_state import UiSurfaceState, UiFacts, UiAssessment, ActionHint, classify_ui_state
 
-__all__ = ["RuntimeState", "StateMachine", "StateTransition", "IllegalTransition"]
+__all__ = [
+    "RuntimeState",
+    "StateMachine",
+    "StateTransition",
+    "IllegalTransition",
+    "UiSurfaceState",
+    "UiFacts",
+    "UiAssessment",
+    "ActionHint",
+    "classify_ui_state",
+]
