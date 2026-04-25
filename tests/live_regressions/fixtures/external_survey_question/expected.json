@@ -1,0 +1,5 @@
+{
+  "state": "EXTERNAL_SURVEY_QUESTION",
+  "action_type": "answer_question",
+  "confidence_min": 0.9
+}

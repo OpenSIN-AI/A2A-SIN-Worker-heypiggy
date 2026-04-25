@@ -1,0 +1,4 @@
+{
+  "action_desc": "pick best survey",
+  "raw_output": "**Step 1: Analyze**\nThe dashboard shows many cards.\n{\"selector\": \"#survey-65925591\"}\nUse this one."
+}

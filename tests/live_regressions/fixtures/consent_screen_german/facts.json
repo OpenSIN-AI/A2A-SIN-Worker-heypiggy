@@ -1,0 +1,11 @@
+{
+  "url": "https://enter.ipsosinteractive.com/consent",
+  "title": "Datenschutzerklärung",
+  "body_text": "Datenschutzerklärung Zustimmen und fortfahren Annehmen und beginnen",
+  "question_text": "",
+  "primary_buttons": ["Zustimmen und fortfahren", "Annehmen und beginnen"],
+  "survey_card_count": 0,
+  "has_modal_overlay": false,
+  "has_captcha_widget": false,
+  "visible_domains": ["enter.ipsosinteractive.com"]
+}

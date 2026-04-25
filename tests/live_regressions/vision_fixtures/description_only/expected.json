@@ -1,0 +1,9 @@
+{
+  "verdict": "PROCEED",
+  "page_state": "unknown",
+  "next_action": "vision_click",
+  "next_params": {
+    "description": "Zustimmen und fortfahren"
+  },
+  "progress": true
+}

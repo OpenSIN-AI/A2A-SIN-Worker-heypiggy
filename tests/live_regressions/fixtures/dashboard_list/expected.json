@@ -1,0 +1,6 @@
+{
+  "state": "DASHBOARD_LIST",
+  "action_type": "open_best_survey",
+  "target_contains": "#survey-",
+  "confidence_min": 0.9
+}

@@ -1,0 +1,6 @@
+{
+  "state": "CAPTCHA",
+  "action_type": "escalate_captcha",
+  "blockers_include": ["captcha"],
+  "confidence_min": 0.95
+}

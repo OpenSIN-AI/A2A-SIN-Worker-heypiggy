@@ -1,0 +1,5 @@
+{
+  "state": "LOGIN",
+  "action_type": "continue_google_login",
+  "confidence_min": 0.8
+}

@@ -1,0 +1,11 @@
+{
+  "url": "https://survey.vendor.example/start",
+  "title": "Survey",
+  "body_text": "Please answer the following question Next",
+  "question_text": "Which of these company types do you work with?",
+  "primary_buttons": ["Next"],
+  "survey_card_count": 0,
+  "has_modal_overlay": false,
+  "has_captcha_widget": false,
+  "visible_domains": ["survey.vendor.example"]
+}

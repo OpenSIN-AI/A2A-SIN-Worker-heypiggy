@@ -1,0 +1,9 @@
+{
+  "verdict": "PROCEED",
+  "page_state": "unknown",
+  "next_action": "click_element",
+  "next_params": {
+    "selector": "#survey-65925591"
+  },
+  "progress": true
+}

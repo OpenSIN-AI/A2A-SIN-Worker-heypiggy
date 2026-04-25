@@ -1,0 +1,11 @@
+{
+  "url": "https://www.heypiggy.com/login",
+  "title": "HeyPiggy – Login",
+  "body_text": "Mit Google anmelden Continue with Google Level 0",
+  "question_text": "",
+  "primary_buttons": ["Mit Google anmelden"],
+  "survey_card_count": 0,
+  "has_modal_overlay": false,
+  "has_captcha_widget": false,
+  "visible_domains": []
+}

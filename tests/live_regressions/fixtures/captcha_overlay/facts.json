@@ -1,0 +1,11 @@
+{
+  "url": "https://www.heypiggy.com/?page=dashboard",
+  "title": "Security check",
+  "body_text": "Please verify you are human captcha",
+  "question_text": "",
+  "primary_buttons": [],
+  "survey_card_count": 0,
+  "has_modal_overlay": true,
+  "has_captcha_widget": true,
+  "visible_domains": []
+}

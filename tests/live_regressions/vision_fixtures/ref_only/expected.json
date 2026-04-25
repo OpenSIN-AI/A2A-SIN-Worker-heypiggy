@@ -1,0 +1,9 @@
+{
+  "verdict": "PROCEED",
+  "page_state": "unknown",
+  "next_action": "click_ref",
+  "next_params": {
+    "ref": "@e9"
+  },
+  "progress": true
+}

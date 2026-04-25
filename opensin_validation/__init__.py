@@ -10,5 +10,6 @@
 
 """Validation harness -- issue #76."""
 from opensin_validation.harness import ValidationReport, ValidationHarness
+from opensin_validation.replay import ReplayHarness, ReplayFixture
 
-__all__ = ["ValidationReport", "ValidationHarness"]
+__all__ = ["ValidationReport", "ValidationHarness", "ReplayHarness", "ReplayFixture"]

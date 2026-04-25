@@ -1,0 +1,6 @@
+{
+  "state": "DASHBOARD_MODAL_SURVEY",
+  "action_type": "answer_question",
+  "target_contains": "1000 - 1499",
+  "confidence_min": 0.95
+}

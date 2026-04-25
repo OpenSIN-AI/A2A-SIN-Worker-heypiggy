@@ -1,0 +1,5 @@
+{
+  "state": "CONSENT_SCREEN",
+  "action_type": "accept_consent",
+  "confidence_min": 0.95
+}

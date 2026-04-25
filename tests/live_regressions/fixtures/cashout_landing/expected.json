@@ -1,0 +1,7 @@
+{
+  "state": "WRONG_LANDING_CASHOUT",
+  "action_type": "navigate_dashboard",
+  "target_contains": "dashboard",
+  "blockers_include": ["wrong_landing"],
+  "confidence_min": 0.95
+}

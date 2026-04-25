@@ -1,0 +1,6 @@
+{
+  "state": "DASHBOARD_MODAL_SURVEY",
+  "action_type": "click_next",
+  "target_contains": "Nächste",
+  "confidence_min": 0.95
+}

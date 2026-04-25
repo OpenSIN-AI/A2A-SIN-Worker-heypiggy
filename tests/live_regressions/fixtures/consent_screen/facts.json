@@ -1,0 +1,11 @@
+{
+  "url": "https://rx.samplicio.us/consent/start",
+  "title": "Consent",
+  "body_text": "I want to complete this survey I want to continue with the other survey Continue",
+  "question_text": "",
+  "primary_buttons": ["Continue"],
+  "survey_card_count": 0,
+  "has_modal_overlay": false,
+  "has_captcha_widget": false,
+  "visible_domains": ["rx.samplicio.us"]
+}
