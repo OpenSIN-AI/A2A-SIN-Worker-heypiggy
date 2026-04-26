@@ -250,7 +250,7 @@ VISION_BACKEND = os.environ.get("VISION_BACKEND", "auto").lower()
 # screenshot-basierte Vision-Authentifizierung testen, BEVOR irgendeine Browser-
 # Mutation stattfindet. Dafür reicht ein minimales gültiges PNG als sicherer Probe.
 VISION_AUTH_PROBE_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5wZuoAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8//8/AwMDEwMDAwMDAwAkBgMB/DXemwAAAABJRU5ErkJggg=="
 )
 
 # Verzeichnisse für Artefakte
@@ -1491,7 +1491,7 @@ def ensure_vision_probe_screenshot() -> str:
     CONSEQUENCES: Gibt immer einen stabilen lokalen PNG-Pfad für den Probe zurück.
     """
     probe_path = SCREENSHOT_DIR / "vision_auth_probe.png"
-    if not probe_path.exists():
+    if not probe_path.exists() or probe_path.read_bytes() != VISION_AUTH_PROBE_PNG:
         probe_path.write_bytes(VISION_AUTH_PROBE_PNG)
     return str(probe_path)
 
@@ -1951,6 +1951,7 @@ async def _run_vision_opencode(
     timeout: int = 120,
     step_num: int = 0,
     purpose: str = "vision",
+    breaker: CircuitBreaker | None = None,
 ) -> dict[str, object]:
     """
     Führt einen screenshot-basierten OpenSIN-Vision-Call über `opencode run` aus.
@@ -1958,7 +1959,9 @@ async def _run_vision_opencode(
     nutzen, damit Auth-Fehler zentral erkannt und fail-closed behandelt werden.
     CONSEQUENCES: Gibt strukturierte Resultate mit `ok` und `auth_failure` zurück.
     """
-    if not VISION_CIRCUIT_BREAKER.allow_request():
+    active_breaker = breaker or VISION_CIRCUIT_BREAKER
+
+    if not active_breaker.allow_request():
         audit("error", message=f"Vision circuit open ({purpose})", step=step_num)
         return {
             "ok": False,
@@ -2009,7 +2012,7 @@ async def _run_vision_opencode(
                 process.kill()
             except:
                 pass
-            VISION_CIRCUIT_BREAKER.record_failure()
+            active_breaker.record_failure()
             return {
                 "ok": False,
                 "auth_failure": False,
@@ -2029,7 +2032,7 @@ async def _run_vision_opencode(
                 and process.returncode in (124, 137)
                 and not auth_error
             ):
-                VISION_CIRCUIT_BREAKER.record_success()
+                active_breaker.record_success()
                 return {
                     "ok": True,
                     "auth_failure": False,
@@ -2039,7 +2042,7 @@ async def _run_vision_opencode(
                     "returncode": process.returncode,
                 }
             if full_text and process.returncode in (124, 137):
-                VISION_CIRCUIT_BREAKER.record_success()
+                active_breaker.record_success()
                 return {
                     "ok": True,
                     "auth_failure": False,
@@ -2048,7 +2051,7 @@ async def _run_vision_opencode(
                     "stderr_text": stderr_text,
                     "returncode": process.returncode,
                 }
-            VISION_CIRCUIT_BREAKER.record_failure()
+            active_breaker.record_failure()
             error_message = stderr_text or full_text or f"opencode exit {process.returncode}"
             if auth_error:
                 audit(
@@ -2093,7 +2096,7 @@ async def _run_vision_opencode(
                 "returncode": process.returncode,
             }
 
-        VISION_CIRCUIT_BREAKER.record_success()
+        active_breaker.record_success()
         return {
             "ok": True,
             "auth_failure": False,
@@ -2103,7 +2106,7 @@ async def _run_vision_opencode(
         }
 
     except asyncio.TimeoutError:
-        VISION_CIRCUIT_BREAKER.record_failure()
+        active_breaker.record_failure()
         audit("error", message=f"Vision Timeout ({purpose})", step=step_num)
         return {
             "ok": False,
@@ -2130,7 +2133,7 @@ async def _run_vision_opencode(
                 "stderr_text": str(e),
                 "returncode": None,
             }
-        VISION_CIRCUIT_BREAKER.record_failure()
+        active_breaker.record_failure()
         audit("error", message=f"Vision Exception ({purpose}): {e}", step=step_num)
         return {
             "ok": False,
@@ -2315,6 +2318,7 @@ async def run_vision_model(
     timeout: int = 120,
     step_num: int = 0,
     purpose: str = "vision",
+    breaker: CircuitBreaker | None = None,
 ) -> dict[str, object]:
     if VISION_BACKEND == "nvidia":
         return await _run_vision_nvidia(
@@ -2338,6 +2342,7 @@ async def run_vision_model(
         timeout=timeout,
         step_num=step_num,
         purpose=purpose,
+        breaker=breaker,
     )
 
 
@@ -2352,6 +2357,64 @@ async def ensure_worker_preflight() -> dict:
         reason = f"Pflicht-Env fehlt: {', '.join(missing)}"
         audit("stop", reason=reason)
         return {"ok": False, "reason": reason}
+
+    # WHY: Vision auth must be proven before we launch a browser or create any
+    # dashboard/login tab. The operator explicitly asked for the opencode/OpenAI
+    # path to be the primary vision backend, and recent live runs showed that
+    # spinning up Playwright first can make the opencode probe intermittently
+    # time out. Therefore the screenshot-based vision probe stays the first real
+    # runtime dependency we validate.
+    probe_path = ensure_vision_probe_screenshot()
+    preflight_breaker = CircuitBreaker(
+        failure_threshold=3,
+        recovery_timeout=10.0,
+    )
+    probe_prompt = (
+        'Antworte ausschließlich mit gültigem JSON im Format {"status":"ok"}. Keine Erklärungen.'
+    )
+    probe_result = await run_vision_model(
+        probe_prompt,
+        probe_path,
+        timeout=60,
+        step_num=0,
+        purpose="preflight_auth_probe",
+        breaker=preflight_breaker,
+    )
+    if not probe_result.get("ok"):
+        reason = str(probe_result.get("error", "Vision-Probe fehlgeschlagen"))
+        transient_probe_failure = (
+            "Vision timeout" in reason
+            or "Vision timeout or error" in reason
+            or reason.strip() == "Vision-Probe fehlgeschlagen"
+        ) and not probe_result.get("auth_failure")
+        if transient_probe_failure:
+            audit(
+                "vision_preflight_retry",
+                reason=reason[:160],
+                message="Opencode/OpenAI preflight once retried after transient timeout/error",
+            )
+            probe_result = await run_vision_model(
+                probe_prompt,
+                probe_path,
+                timeout=60,
+                step_num=0,
+                purpose="preflight_auth_probe",
+                breaker=preflight_breaker,
+            )
+        if not probe_result.get("ok"):
+            reason = probe_result.get("error", "Vision-Probe fehlgeschlagen")
+            audit("stop", reason=f"Vision-Preflight fehlgeschlagen: {reason}")
+            return {"ok": False, "reason": reason}
+
+    # Preflight-Probe beweist nur dass Vision-Auth funktioniert (ok=True ohne auth_failure).
+    # Das Modell antwortet manchmal mit Freitext statt reinem JSON — das ist OK.
+    # Wir prüfen NUR: Hat opencode den Call ohne Auth-Fehler durchgeführt?
+    # WHY: Ein 1x1 PNG Probe braucht kein Strict-JSON-Format — es reicht der erfolgreiche Call.
+    probe_text = probe_result.get("text", "")
+    audit(
+        "success",
+        message=f"Vision-Preflight OK: Auth healthy, Antwort={probe_text[:80]}",
+    )
 
     # Skip Bridge check if using Playwright driver (Playwright has its own browser!)
     driver_type = os.environ.get("DRIVER_TYPE", "playwright").lower()
@@ -2374,43 +2437,24 @@ async def ensure_worker_preflight() -> dict:
         except Exception as e:
             audit("preflight_playwright_error", error=str(e))
 
-    if _bridge_v2_enabled():
+    # WHY: The local Playwright driver never talks to the MCP extension for the
+    # dashboard→survey click path. Contract pinning against `bridge.contract`
+    # must therefore stay disabled in Playwright mode; otherwise the worker can
+    # abort before it even reaches the dashboard simply because the browser
+    # extension is disconnected.
+    if _bridge_v2_enabled() and driver_type != "playwright":
         try:
             await _pin_bridge_contract_if_needed()
         except Exception as exc:
             reason = f"bridge_contract_pin_failed: {exc}"
             audit("stop", reason=reason)
             return {"ok": False, "reason": reason}
-
-    probe_path = ensure_vision_probe_screenshot()
-    probe_prompt = (
-        'Antworte ausschließlich mit gültigem JSON im Format {"status":"ok"}. Keine Erklärungen.'
-    )
-    probe_result = await run_vision_model(
-        probe_prompt,
-        probe_path,
-        timeout=60,
-        step_num=0,
-        purpose="preflight_auth_probe",
-    )
-    if not probe_result.get("ok"):
-        reason = probe_result.get("error", "Vision-Probe fehlgeschlagen")
-        audit("stop", reason=f"Vision-Preflight fehlgeschlagen: {reason}")
-        return {"ok": False, "reason": reason}
-
-    # Preflight-Probe beweist nur dass Vision-Auth funktioniert (ok=True ohne auth_failure).
-    # Das Modell antwortet manchmal mit Freitext statt reinem JSON — das ist OK.
-    # Wir prüfen NUR: Hat opencode den Call ohne Auth-Fehler durchgeführt?
-    # WHY: Ein 1x1 PNG Probe braucht kein Strict-JSON-Format — es reicht der erfolgreiche Call.
-    probe_text = probe_result.get("text", "")
-    if not probe_text:
-        # Leere Antwort = Vision hat geantwortet aber nichts zurückgegeben → trotzdem OK
-        # (manchmal gibt das Modell bei einem leeren Bild nur Whitespace zurück)
-        pass
-    audit(
-        "success",
-        message=f"Vision-Preflight OK: Auth healthy, Antwort={probe_text[:80]}",
-    )
+    elif _bridge_v2_enabled() and driver_type == "playwright":
+        audit(
+            "bridge_contract_skip",
+            reason="playwright_driver",
+            message="bridge.contract pin skipped because Playwright driver is active",
+        )
 
     audit("success", message="Worker-Preflight bestanden: Env + Vision auth healthy")
     return {"ok": True, "reason": "ready"}
@@ -2804,6 +2848,307 @@ async def click_start_survey_modal_button() -> bool:
     return ok
 
 
+def _consent_prompt_text_matches(body_text: str, url: str = "") -> bool:
+    """Recognize the consent/another-survey-open prompts from the old baseline."""
+    haystack = f"{body_text} {url}".lower()
+    return any(
+        token in haystack
+        for token in (
+            "already another survey open",
+            "i want to complete this survey",
+            "i want to continue with the other survey",
+            "datenschutzerklärung",
+            "zustimmen und fortfahren",
+            "annehmen und beginnen",
+            "consent",
+        )
+    )
+
+
+async def _list_worker_tabs() -> list[dict[str, object]]:
+    """Return all tabs currently visible to the active driver/backend."""
+    tabs_result = await execute_bridge("tabs_list", {})
+    tabs = tabs_result.get("tabs", []) if isinstance(tabs_result, dict) else []
+    return [tab for tab in tabs if isinstance(tab, dict)]
+
+
+async def _select_active_worker_tab() -> dict[str, object] | None:
+    """Pick the most survey-like tab after clickSurvey/modal handoff.
+
+    WHY: The PlayStealth baseline often opened the real survey, a consent page,
+    or an intermediate panel in a second tab. The worker must bind itself to the
+    tab that actually contains the survey flow instead of staying on the
+    dashboard tab forever.
+    """
+    global CURRENT_TAB_ID, CURRENT_WINDOW_ID
+
+    tabs = await _list_worker_tabs()
+    if not tabs:
+        return None
+
+    score_js = r"""
+    (() => {
+      const text = String(document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+      const lowered = text.toLowerCase();
+      const visibleInputCount = Array.from(document.querySelectorAll('input[type="checkbox"], input[type="radio"], textarea, select'))
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          return !!(r.width || r.height || el.getClientRects().length);
+        }).length;
+      return {
+        bodyText: text.slice(0, 400),
+        visibleInputCount,
+        hasStartModal: !!document.querySelector('#start-survey-button'),
+        hasOverlay: !!document.querySelector('iframe, [role="dialog"], .modal, .overlay'),
+        hasTextarea: !!document.querySelector('textarea'),
+        hasQuestionPrompt: /frage|question|weiter|continue|agree|zustimmen/i.test(text),
+        url: window.location.href,
+        title: document.title || '',
+      };
+    })();
+    """
+
+    best_score = -10_000
+    best_tab: dict[str, object] | None = None
+    best_payload: dict[str, object] | None = None
+
+    for tab in tabs:
+        tab_id = tab.get("id")
+        if not isinstance(tab_id, int):
+            continue
+        payload_result = await execute_bridge(
+            "execute_javascript",
+            {"script": score_js, "tabId": tab_id},
+        )
+        payload = payload_result.get("result") if isinstance(payload_result, dict) else None
+        if not isinstance(payload, dict):
+            payload = {}
+
+        url = str(payload.get("url") or tab.get("url") or "")
+        body_text = str(payload.get("bodyText") or "")
+        score = int(payload.get("visibleInputCount", 0) or 0) * 10
+        if "ipsosinteractive.com" in url.lower() or "samplicio.us" in url.lower():
+            score += 20
+        if _consent_prompt_text_matches(body_text, url):
+            score += 25
+        if bool(payload.get("hasStartModal")):
+            score += 20
+        if bool(payload.get("hasTextarea")):
+            score += 15
+        if bool(payload.get("hasQuestionPrompt")):
+            score += 10
+        if "deine verfügbaren quellen" in body_text.lower() or "survey list" in body_text.lower():
+            score -= 5
+
+        if score > best_score:
+            best_score = score
+            best_tab = tab
+            best_payload = payload
+
+    if best_tab is None:
+        return None
+
+    new_tab_id = best_tab.get("id")
+    if isinstance(new_tab_id, int):
+        CURRENT_TAB_ID = new_tab_id
+    new_window_id = best_tab.get("windowId")
+    if isinstance(new_window_id, int):
+        CURRENT_WINDOW_ID = new_window_id
+
+    audit(
+        "worker_tab_selected",
+        tab_id=CURRENT_TAB_ID,
+        window_id=CURRENT_WINDOW_ID,
+        score=best_score,
+        url=str((best_payload or {}).get("url") or best_tab.get("url") or "")[:160],
+        title=str((best_payload or {}).get("title") or best_tab.get("title") or "")[:120],
+        has_start_modal=bool((best_payload or {}).get("hasStartModal")),
+        consent_like=_consent_prompt_text_matches(
+            str((best_payload or {}).get("bodyText") or ""),
+            str((best_payload or {}).get("url") or best_tab.get("url") or ""),
+        ),
+    )
+    return best_tab
+
+
+async def _handle_survey_consent_prompt_current_tab() -> bool:
+    """Auto-handle consent / another-survey-open prompts on the current tab."""
+    tab_params = _tab_params()
+    js_code = r"""
+    (() => {
+      const text = String(document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+      const lowered = text.toLowerCase();
+      const isVisible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return !!(r.width || r.height || el.getClientRects().length);
+      };
+      const clickNode = (node) => {
+        if (!node) return false;
+        try { node.scrollIntoView({behavior: 'instant', block: 'center'}); } catch (_) {}
+        try { if (typeof node.focus === 'function') node.focus(); } catch (_) {}
+        try { node.click(); return true; } catch (_) {}
+        try { node.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true})); return true; } catch (_) {}
+        return false;
+      };
+      const clickByText = (needle) => {
+        const lower = needle.toLowerCase();
+        const candidates = Array.from(document.querySelectorAll('button, label, [role="button"], [role="radio"], a, span, div'));
+        for (const candidate of candidates) {
+          const candidateText = String(candidate.innerText || candidate.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          if (!candidateText || !isVisible(candidate)) continue;
+          if (candidateText.includes(lower)) return clickNode(candidate.closest('button,label,[role="button"],[role="radio"]') || candidate);
+        }
+        return false;
+      };
+      const clickCheckbox = () => {
+        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+        for (const checkbox of checkboxes) {
+          if (!isVisible(checkbox)) continue;
+          if (clickNode(checkbox)) return true;
+        }
+        return false;
+      };
+
+      let handled = false;
+      if (lowered.includes('already another survey open')) {
+        handled = clickByText('I want to complete this survey') || handled;
+        handled = clickByText('I want to continue with the other survey') || handled;
+        handled = clickByText('Continue') || handled;
+      }
+      if (lowered.includes('datenschutzerklärung') || lowered.includes('zustimmen und fortfahren') || lowered.includes('annehmen und beginnen')) {
+        handled = clickCheckbox() || handled;
+        handled = clickByText('Zustimmen und fortfahren') || handled;
+        handled = clickByText('Annehmen und beginnen') || handled;
+        handled = clickByText('Continue') || handled;
+      }
+      if (lowered.includes('consent') && !handled) {
+        handled = clickByText('Continue') || handled;
+      }
+      return {
+        handled,
+        bodyText: text.slice(0, 240),
+        url: window.location.href,
+      };
+    })();
+    """
+    result = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
+    payload = result.get("result") if isinstance(result, dict) else None
+    handled = bool(isinstance(payload, dict) and payload.get("handled"))
+    audit(
+        "survey_consent_prompt",
+        handled=handled,
+        url=str(payload.get("url", ""))[:160] if isinstance(payload, dict) else "",
+        snippet=str(payload.get("bodyText", ""))[:160] if isinstance(payload, dict) else "",
+    )
+    return handled
+
+
+async def _advance_survey_start_modal(
+    before_url: str = "", before_title: str = "", max_attempts: int = 3
+) -> dict[str, object]:
+    """Advance the post-clickSurvey modal/popup flow back into the real survey.
+
+    WHY: The last known-good PlayStealth baseline did not stop after the raw
+    dashboard card click. It explicitly handled the follow-up start modal and
+    only considered the card open successful once the UI moved into a survey or
+    consent/question surface.
+    """
+    global _SURVEY_START_PENDING
+
+    for attempt in range(1, max_attempts + 1):
+        await _select_active_worker_tab()
+        progress, state, reason = await _detect_click_progress_state()
+        audit(
+            "survey_start_followup_probe",
+            attempt=attempt,
+            progress=progress,
+            state=state,
+            reason=str(reason or "")[:160],
+            pending=_SURVEY_START_PENDING,
+        )
+        if progress:
+            return {
+                "advanced": True,
+                "state": state,
+                "reason": reason,
+                "via": "progress_state",
+            }
+
+        consent_handled = await _handle_survey_consent_prompt_current_tab()
+        if consent_handled:
+            await _select_active_worker_tab()
+            progress, state, reason = await _detect_click_progress_state()
+            audit(
+                "survey_start_followup_post_consent",
+                attempt=attempt,
+                progress=progress,
+                state=state,
+                reason=str(reason or "")[:160],
+                pending=_SURVEY_START_PENDING,
+            )
+            if progress:
+                return {
+                    "advanced": True,
+                    "state": state,
+                    "reason": reason,
+                    "via": "consent_prompt",
+                }
+
+        modal_clicked = await click_start_survey_modal_button()
+        audit(
+            "survey_start_followup_modal",
+            attempt=attempt,
+            modal_clicked=modal_clicked,
+            pending=_SURVEY_START_PENDING,
+        )
+        if modal_clicked:
+            await _select_active_worker_tab()
+            consent_handled = await _handle_survey_consent_prompt_current_tab()
+            if consent_handled:
+                await _select_active_worker_tab()
+            progress, state, reason = await _detect_click_progress_state()
+            audit(
+                "survey_start_followup_post_modal",
+                attempt=attempt,
+                progress=progress,
+                state=state,
+                reason=str(reason or "")[:160],
+                pending=_SURVEY_START_PENDING,
+            )
+            if progress:
+                return {
+                    "advanced": True,
+                    "state": state,
+                    "reason": reason,
+                    "via": "start_modal",
+                }
+
+        if before_url or before_title:
+            dom_change = await dom_verify_change(before_url, before_title)
+            if dom_change.get("changed"):
+                return {
+                    "advanced": True,
+                    "state": "dom_changed",
+                    "reason": str(
+                        dom_change.get("current_url")
+                        or dom_change.get("current_title")
+                        or "DOM changed after survey start"
+                    )[:160],
+                    "via": "dom_change",
+                }
+
+        await asyncio.sleep(0.35)
+
+    _SURVEY_START_PENDING = False
+    return {
+        "advanced": False,
+        "state": "dashboard",
+        "reason": "Survey start modal follow-up made no progress",
+        "via": "none",
+    }
+
+
 # ============================================================================
 # CAPTCHA BYPASS — Auto-Erkennung und Behandlung von Captchas (NEU in v3.1)
 # ============================================================================
@@ -3162,6 +3507,114 @@ async def resolve_survey_selector(selector: str, description: str = "") -> str:
     return selector
 
 
+async def click_dashboard_survey_card(selector: str = "", description: str = "") -> dict[str, object]:
+    """Open a HeyPiggy dashboard survey card using the old clickSurvey path.
+
+    WHY: The last known-good PlayStealth baseline did not rely on a generic
+    CSS click for survey cards. It preferred the dashboard's native
+    ``clickSurvey('<id>')`` wiring when available, which is more reliable than
+    a plain ``div.survey-item`` click when cards have delegated handlers.
+    """
+    tab_params = _tab_params()
+    before_info = await execute_bridge("get_page_info", tab_params)
+    before_url, before_title, _before_status = _page_info_fields(before_info)
+    selector_hint = str(selector or "").strip()
+    description_hint = str(description or "").strip()
+    js_code = rf"""
+    (() => {{
+      const selectorHint = {json.dumps(selector_hint)};
+      const descriptionHint = {json.dumps(description_hint)};
+      const rootSelector = '#survey_list .survey-item, div.survey-item, [id^="survey-"], .survey-card';
+      const isVisible = (el) => {{
+        if (!el) return false;
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 8 && rect.height > 8 && style.display !== 'none' && style.visibility !== 'hidden';
+      }};
+      const textOf = (el) => String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      const priceOf = (text) => {{
+        const m = String(text || '').match(/(\d+[.,]\d+)\s*€/);
+        return m ? parseFloat(m[1].replace(',', '.')) : -1;
+      }};
+      const cards = Array.from(document.querySelectorAll(rootSelector)).filter(isVisible);
+      const selectorId = selectorHint.startsWith('#survey-') ? selectorHint.slice(1) : '';
+      const descriptionPrice = (() => {{
+        const m = descriptionHint.match(/(\d+[.,]\d+)\s*€/);
+        return m ? m[1].replace(',', '.') : '';
+      }})();
+      let chosen = null;
+      if (selectorId) chosen = cards.find((el) => (el.id || '') === selectorId) || null;
+      if (!chosen && descriptionPrice) {{
+        chosen = cards.find((el) => textOf(el).replace(',', '.').includes(descriptionPrice)) || null;
+      }}
+      if (!chosen && cards.length) {{
+        chosen = [...cards].sort((a, b) => priceOf(textOf(b)) - priceOf(textOf(a)))[0];
+      }}
+      if (!chosen) return {{ clicked: false, reason: 'no_card', selectorHint, descriptionHint, cardCount: cards.length }};
+      const onclick = String(chosen.getAttribute('onclick') || '');
+      const text = textOf(chosen).slice(0, 160);
+      const surveyIdMatch = onclick.match(/clickSurvey\('([^']+)'\)/);
+      chosen.scrollIntoView({{ behavior: 'instant', block: 'center' }});
+      if (typeof chosen.focus === 'function') chosen.focus();
+      let clickError = '';
+      try {{ chosen.dispatchEvent(new MouseEvent('click', {{ bubbles: true, cancelable: true }})); }} catch (_error) {{}}
+      try {{ if (typeof chosen.click === 'function') chosen.click(); }} catch (error) {{ clickError = String(error); }}
+      return {{
+        clicked: true,
+        via: 'element.click',
+        selector: chosen.id ? `#${{chosen.id}}` : selectorHint,
+        text,
+        onclick,
+        surveyId: surveyIdMatch ? surveyIdMatch[1] : '',
+        clickError,
+      }};
+    }})();
+    """
+    result = await execute_bridge("execute_javascript", {"script": js_code, **tab_params})
+    payload = result.get("result") if isinstance(result, dict) else None
+    if not isinstance(payload, dict):
+        payload = {"clicked": False, "reason": "invalid_payload", "raw": str(payload)[:160]}
+    if payload.get("clicked"):
+        first_stage = await _advance_survey_start_modal(
+            before_url=before_url,
+            before_title=before_title,
+            max_attempts=1,
+        )
+        payload.update(first_stage)
+
+        survey_id = str(payload.get("surveyId", "") or "").strip()
+        if not first_stage.get("advanced") and survey_id:
+            click_survey_js = f"""
+            (() => {{
+              const sid = {json.dumps(survey_id)};
+              if (!sid) return {{ ok: false, reason: 'missing_survey_id' }};
+              if (typeof window.clickSurvey !== 'function') {{
+                return {{ ok: false, reason: 'missing_clickSurvey' }};
+              }}
+              try {{
+                const result = window.clickSurvey(sid);
+                return {{ ok: true, surveyId: sid, result }};
+              }} catch (error) {{
+                return {{ ok: false, surveyId: sid, reason: String(error) }};
+              }}
+            }})();
+            """
+            click_survey_result = await execute_bridge(
+                "execute_javascript",
+                {"script": click_survey_js, **tab_params},
+            )
+            click_survey_payload = (
+                click_survey_result.get("result") if isinstance(click_survey_result, dict) else None
+            )
+            payload["clickSurvey_result"] = click_survey_payload
+            payload["via"] = "clickSurvey"
+            payload.update(
+                await _advance_survey_start_modal(before_url=before_url, before_title=before_title)
+            )
+    audit("dashboard_card_click", **{k: v for k, v in payload.items() if k != "result"})
+    return payload
+
+
 async def recover_worker_tab_id() -> int | None:
     """
     Stellt die exakt bekannte Worker-Tab-ID wieder her.
@@ -3331,6 +3784,78 @@ async def _execute_via_driver(driver: BrowserDriver, method: str, params: dict) 
             selector = params.get("selector", "")
             result = await driver.click(selector, tab_id)
             return {"success": result.success, "error": result.error}
+
+        elif method == "ghost_click":
+            selector = params.get("selector", "")
+            result = await driver.click(selector, tab_id)
+            return {"success": result.success, "error": result.error}
+
+        elif method == "dom.queryAll":
+            selector = str(params.get("selector", "") or "")
+            script = rf"""
+            (() => {{
+              const selector = {json.dumps(selector)};
+              const cssEscape = (value) => {{
+                if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(value);
+                return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\\\$&');
+              }};
+              const isVisible = (el) => {{
+                if (!el) return false;
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                return !!(rect.width || rect.height || el.getClientRects().length) && style.display !== 'none' && style.visibility !== 'hidden';
+              }};
+              const textOf = (el) => String(el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
+              const selectorOf = (el) => {{
+                if (!el || el.nodeType !== 1) return '';
+                if (el.id) return `#${{cssEscape(el.id)}}`;
+                const surveyId = el.getAttribute('data-survey-id');
+                if (surveyId) return `[data-survey-id="${{cssEscape(surveyId)}}"]`;
+                const parts = [];
+                let node = el;
+                while (node && node.nodeType === 1 && parts.length < 5) {{
+                  let part = node.tagName.toLowerCase();
+                  const classNames = Array.from(node.classList || []).filter(Boolean).slice(0, 2);
+                  if (classNames.length) part += '.' + classNames.map(cssEscape).join('.');
+                  if (node.parentElement) {{
+                    const siblings = Array.from(node.parentElement.children).filter((child) => child.tagName === node.tagName);
+                    if (siblings.length > 1) part += `:nth-of-type(${{siblings.indexOf(node) + 1}})`;
+                  }}
+                  parts.unshift(part);
+                  const candidate = parts.join(' > ');
+                  try {{
+                    if (document.querySelectorAll(candidate).length === 1) return candidate;
+                  }} catch (_) {{}}
+                  node = node.parentElement;
+                }}
+                return parts.join(' > ');
+              }};
+              const attr = (el, name) => String(el?.getAttribute?.(name) || '');
+              return Array.from(document.querySelectorAll(selector))
+                .filter(isVisible)
+                .slice(0, 200)
+                .map((el) => {{
+                  const ref = attr(el, 'data-ref') || attr(el, 'data-ref-id');
+                  return {{
+                    selector: selectorOf(el),
+                    ref,
+                    id: el.id || '',
+                    text: textOf(el).slice(0, 240),
+                    tag: String(el.tagName || '').toLowerCase(),
+                    href: attr(el, 'href'),
+                    title: attr(el, 'title'),
+                    ariaLabel: attr(el, 'aria-label'),
+                    onclick: attr(el, 'onclick').slice(0, 240),
+                    className: String(el.className || '').slice(0, 240),
+                  }};
+                }});
+            }})()
+            """
+            result = await driver.execute_javascript(script, tab_id)
+            if result.error:
+                return {"error": result.error, "items": []}
+            items = result.result if isinstance(result.result, list) else []
+            return {"items": items}
 
         elif method == "dom.type" or method == "type_text":
             # Type text
@@ -6996,6 +7521,22 @@ async def run_click_action(next_params: dict, gate, img_hash: str, step_num: int
         if clicked_choice.get("clicked"):
             audit("choice_click", target=description[:80], result=str(clicked_choice.get("result", ""))[:160])
             return True
+
+    if page_state_machine.current_value() == "dashboard" and (
+        (selector and ("survey-item" in selector.lower() or selector.lower().startswith("#survey-")))
+        or (description and "€" in description)
+    ):
+        direct_open = await click_dashboard_survey_card(selector=selector, description=description)
+        if direct_open.get("clicked") and direct_open.get("advanced"):
+            return True
+        if direct_open.get("clicked"):
+            audit(
+                "dashboard_card_click_fallback",
+                selector=str(selector or "")[:120],
+                description=str(description or "")[:120],
+                via=str(direct_open.get("via", ""))[:80],
+                reason=str(direct_open.get("reason", ""))[:160],
+            )
 
     if failure_target and gate.is_selector_failed(failure_target):
         audit(
