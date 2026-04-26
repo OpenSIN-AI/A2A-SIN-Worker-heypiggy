@@ -19,6 +19,24 @@ def test_ui_guided_decision_opens_best_dashboard_survey():
     assert decision["next_params"] == {"selector": "#survey-65925591"}
 
 
+def test_ui_guided_decision_falls_back_to_generic_survey_item_selector():
+    assessment = UiAssessment(
+        state=UiSurfaceState.DASHBOARD_LIST,
+        confidence=0.94,
+        reason="Visible dashboard with survey cards",
+        recommended_action=ActionHint("open_best_survey", ""),
+    )
+
+    decision = worker._decision_from_ui_assessment(
+        assessment,
+        UiFacts(survey_card_count=12),
+    )
+
+    assert decision is not None
+    assert decision["next_action"] == "click_element"
+    assert decision["next_params"] == {"selector": "div.survey-item"}
+
+
 def test_ui_guided_decision_accepts_consent_by_label():
     assessment = UiAssessment(
         state=UiSurfaceState.CONSENT_SCREEN,

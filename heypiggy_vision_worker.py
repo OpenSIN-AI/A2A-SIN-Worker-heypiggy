@@ -1808,6 +1808,8 @@ def _decision_from_ui_assessment(assessment, facts: UiFacts | None = None) -> di
 
     if assessment.state == UiSurfaceState.DASHBOARD_LIST and assessment.recommended_action:
         selector = assessment.recommended_action.target.strip()
+        if not selector and facts is not None and facts.survey_card_count > 0:
+            selector = facts.best_survey_selector.strip() or "div.survey-item"
         if selector:
             return {
                 "verdict": "PROCEED",
