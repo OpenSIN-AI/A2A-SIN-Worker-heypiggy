@@ -10,6 +10,16 @@
 
 Nach erfolgreichem Google-Login fehlt **jeder deterministische Code-Pfad, der die erste Umfrage öffnet**. Die komplette "Dashboard → erste Umfrage"-Entscheidung ist in fünf ineinandergreifenden Bugs an Vision delegiert, dem aber gleichzeitig die nötigen Prompt-Bausteine entzogen werden. Das Netto-Verhalten: Vision sieht Login-Seite oder Dashboard-Homepage, bekommt keine Survey-Ref-IDs im Prompt, halluziniert Selektoren (`div.survey-item` ohne ID) und landet in der RETRY-Spirale bis `MAX_NO_PROGRESS` den Worker stoppt.
 
+### Recovery-Milestone (2026-04-26)
+
+- **PlayStealth-Baseline teilweise wiederhergestellt:** Der Worker kommt im Playwright-Pfad wieder durch Vision-Preflight, bindet einen stabilen Worker-Tab, scannt das Dashboard nativ und erzeugt wieder einen echten `queue_begin`-Versuch statt bei `MAX_NO_PROGRESS` zu verhungern.
+- **Wichtige Rückbauten:**
+  - `clickSurvey('<id>')`-Pfad für Dashboard-Karten in `heypiggy_vision_worker.py` wiederhergestellt.
+  - Playwright-Driver auf echte Multi-Tab-Isolation und `tabId`-Routing zurückgeführt (`driver_interface.py`).
+  - Consent-/Start-Modal-Follow-up aus dem alten PlayStealth-Flow wieder in den Monolithen eingebaut.
+  - `dom.queryAll` / `ghost_click` im Playwright-Pfad nativ verfügbar gemacht, damit der Orchestrator nicht mehr sofort in den Bridge-Fallback kippt.
+- **Neuer Stand des Blockers:** Statt gar nichts anzuklicken, landet der Worker jetzt reproduzierbar auf `https://www.heypiggy.com/?page=cashout`. Das beweist, dass der Dashboard→Click-Pfad wieder lebt — der verbleibende Fehler liegt jetzt in der **Survey-Karten-Auswahl / Cashout-Fehlrouting**, nicht mehr im ursprünglichen "klickt gar nichts"-Stillstand.
+
 ---
 
 ## Die fünf Ursachen im Detail
