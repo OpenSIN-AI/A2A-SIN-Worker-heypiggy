@@ -316,6 +316,56 @@ class TestBrowserDriver:
         ]
         assert driver._page._locator.clicked == [3000]
 
+    def test_playwright_list_tabs_returns_all_context_pages(self):
+        class FakePage:
+            def __init__(self, url, title):
+                self.url = url
+                self._title = title
+
+            async def title(self):
+                return self._title
+
+        page_a = FakePage("https://www.heypiggy.com/?page=dashboard", "Dashboard")
+        page_b = FakePage("https://example.com/consent", "Consent")
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._context = type("Ctx", (), {"pages": [page_a, page_b]})()
+        driver._page = page_b
+
+        tabs = asyncio.run(driver.list_tabs())
+
+        assert len(tabs) == 2
+        assert tabs[0]["url"] == page_a.url
+        assert tabs[1]["url"] == page_b.url
+        assert tabs[1]["active"] is True
+
+    def test_playwright_execute_javascript_uses_requested_tab_id(self):
+        class FakePage:
+            def __init__(self, name):
+                self.name = name
+                self.url = f"https://example.com/{name}"
+
+            async def title(self):
+                return self.name
+
+            async def evaluate(self, script):
+                return {"page": self.name, "script": script}
+
+        page_a = FakePage("dashboard")
+        page_b = FakePage("survey")
+
+        driver = PlaywrightDriver({"stealth": False})
+        driver._context = type("Ctx", (), {"pages": [page_a, page_b]})()
+        driver._page = page_a
+
+        tabs = asyncio.run(driver.list_tabs())
+        survey_tab_id = tabs[1]["id"]
+
+        result = asyncio.run(driver.execute_javascript("() => 42", tab_id=survey_tab_id))
+
+        assert result.error is None
+        assert result.result["page"] == "survey"
+
 
 class TestCreateDriver:
     """Tests for create_driver factory function."""

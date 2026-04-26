@@ -422,6 +422,8 @@ class PlaywrightDriver(BrowserDriver):
         self._browser = None
         self._context = None
         self._page = None
+        self._page_ids: dict[int, int] = {}
+        self._next_tab_id = 0
         self._window_width = int(
             self._config.get("width", _env_int("HEYPIGGY_WINDOW_WIDTH", 1024))
         )
@@ -468,6 +470,31 @@ class PlaywrightDriver(BrowserDriver):
     @property
     def driver_type(self) -> DriverType:
         return DriverType.PLAYWRIGHT
+
+    def _register_page(self, page: Any) -> int:
+        key = id(page)
+        if key not in self._page_ids:
+            self._page_ids[key] = self._next_tab_id
+            self._next_tab_id += 1
+        return self._page_ids[key]
+
+    async def _refresh_pages(self) -> list[Any]:
+        pages = list(getattr(self._context, "pages", []) or []) if self._context else []
+        if self._page is not None and self._page not in pages:
+            pages.insert(0, self._page)
+        for page in pages:
+            self._register_page(page)
+        return pages
+
+    async def _resolve_page(self, tab_id: int | None = None) -> Any:
+        pages = await self._refresh_pages()
+        if tab_id is None:
+            return self._page
+        for page in pages:
+            if self._register_page(page) == tab_id:
+                self._page = page
+                return page
+        raise RuntimeError(f"No Playwright page with tab_id={tab_id}")
 
     async def initialize(self) -> None:
         """Launch Playwright mit STEALTH und HUMAN-LIKE Settings.
@@ -536,10 +563,11 @@ class PlaywrightDriver(BrowserDriver):
         self._page = (
             self._context.pages[0] if self._context.pages else await self._context.new_page()
         )
+        self._register_page(self._page)
 
         # Inject stealth script um automation COMPLETT zu verstecken
         if stealth_config:
-            await self._page.add_init_script("""
+            await self._context.add_init_script("""
                 // VERSTECKE ALLE BOT-FINGERABDRÜCKE
                 Object.defineProperty(navigator, 'webdriver', { 
                     get: () => undefined, 
@@ -595,13 +623,14 @@ class PlaywrightDriver(BrowserDriver):
 
     async def screenshot(self, tab_id: int | None = None) -> ScreenshotResult:
         """Screenshot mit Playwright."""
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             raise RuntimeError("Driver not initialized")
-        img = await self._page.screenshot(type="jpeg", quality=85)
+        img = await page.screenshot(type="jpeg", quality=85)
         import base64
 
         data_url = f"data:image/jpeg;base64,{base64.b64encode(img).decode()}"
-        viewport = self._page.viewport_size or {}
+        viewport = page.viewport_size or {}
         return ScreenshotResult(
             data_url=data_url,
             width=viewport.get("width", 0),
@@ -615,10 +644,11 @@ class PlaywrightDriver(BrowserDriver):
         METHODE 2: Human-like Mouse (wenn Selector fail)
         METHODE 3: Keyboard Fallback (wenn alles fail)
         """
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             raise RuntimeError("Driver not initialized")
 
-        locator = self._page.locator(
+        locator = page.locator(
             f'[data-ref="{ref}"], [data-ref-id="{ref}"], [aria-label*="{ref}"], [text="{ref}"]'
         ).first
 
@@ -637,34 +667,35 @@ class PlaywrightDriver(BrowserDriver):
                 target_y = box["y"] + box["height"] / 2
 
                 # Zufälliger Startpunkt
-                await self._page.mouse.move(
+                await page.mouse.move(
                     target_x + random.randint(-100, 100), target_y + random.randint(-100, 100)
                 )
                 # Bewege langsam zum Ziel
-                await self._page.mouse.move(target_x, target_y)
+                await page.mouse.move(target_x, target_y)
                 await asyncio.sleep(random.uniform(0.05, 0.15))
                 # Mouse down/up wie ein Mensch
-                await self._page.mouse.down()
+                await page.mouse.down()
                 await asyncio.sleep(random.uniform(0.05, 0.15))  # HALTE maus taste!
-                await self._page.mouse.up()
+                await page.mouse.up()
                 return ClickResult(success=True, element_ref=ref)
         except Exception as e:
             pass
 
         # METHODE 3: Keyboard Fallback
         try:
-            await self._page.keyboard.press("Tab")
+            await page.keyboard.press("Tab")
             await asyncio.sleep(0.2)
-            await self._page.keyboard.press("Enter")
+            await page.keyboard.press("Enter")
             return ClickResult(success=True, element_ref=ref)
         except Exception as e:
             return ClickResult(success=False, element_ref=ref, error=str(e))
 
     async def click(self, selector: str, tab_id: int | None = None) -> ClickResult:
         """Click per CSS Selector mit human-like behavior."""
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             raise RuntimeError("Driver not initialized")
-        locator = self._page.locator(selector).first
+        locator = page.locator(selector).first
         try:
             await locator.click(timeout=5000)
             return ClickResult(success=True)
@@ -672,13 +703,13 @@ class PlaywrightDriver(BrowserDriver):
             try:
                 box = await locator.bounding_box()
                 if box:
-                    await self._page.mouse.move(
+                    await page.mouse.move(
                         box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
                     )
                     await asyncio.sleep(random.uniform(0.1, 0.2))
-                    await self._page.mouse.down()
+                    await page.mouse.down()
                     await asyncio.sleep(random.uniform(0.05, 0.15))
-                    await self._page.mouse.up()
+                    await page.mouse.up()
                     return ClickResult(success=True)
             except Exception:
                 pass
@@ -688,44 +719,46 @@ class PlaywrightDriver(BrowserDriver):
         self, text: str, selector: str | None = None, tab_id: int | None = None
     ) -> TypeResult:
         """Type mit HUMAN-LIKE timing (variabel, nicht roboterhaft)."""
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             raise RuntimeError("Driver not initialized")
         try:
             if selector:
                 # WHY: React/Vue Inputs brauchen Fokus + Input/Change Events,
                 # nicht nur einen nackten value-Setzer.
-                await self._page.focus(selector)
-                await self._page.fill(selector, text)
+                await page.focus(selector)
+                await page.fill(selector, text)
                 try:
-                    await self._page.dispatch_event(selector, "input")
-                    await self._page.dispatch_event(selector, "change")
+                    await page.dispatch_event(selector, "input")
+                    await page.dispatch_event(selector, "change")
                 except Exception:
                     pass
             else:
                 # Human-like typing: jedes Zeichen mit zufälliger Verzögerung
                 min_delay, max_delay = self._type_delay_ms
                 for char in text:
-                    await self._page.keyboard.type(char, delay=random.randint(min_delay, max_delay))
+                    await page.keyboard.type(char, delay=random.randint(min_delay, max_delay))
             return TypeResult(success=True, characters_sent=len(text))
         except Exception as e:
             return TypeResult(success=False, characters_sent=0, error=str(e))
 
     async def execute_javascript(self, script: str, tab_id: int | None = None) -> JavascriptResult:
         """JavaScript ausführen."""
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             raise RuntimeError("Driver not initialized")
         try:
-            result = await self._page.evaluate(script)
+            result = await page.evaluate(script)
             return JavascriptResult(result=result)
         except Exception as e:
             return JavascriptResult(result=None, error=str(e))
 
-    async def _snapshot_accessibility_tree(self) -> str:
+    async def _snapshot_accessibility_tree(self, page: Any) -> str:
         """Best effort accessibility snapshot for Playwright pages."""
-        if not self._page:
+        if not page:
             return ""
 
-        accessibility = getattr(self._page, "accessibility", None)
+        accessibility = getattr(page, "accessibility", None)
         if accessibility is not None:
             snapshot = getattr(accessibility, "snapshot", None)
             if callable(snapshot):
@@ -761,19 +794,20 @@ class PlaywrightDriver(BrowserDriver):
         })();
         """
         try:
-            result = await self._page.evaluate(fallback_script)
+            result = await page.evaluate(fallback_script)
         except Exception:
             return ""
         return result if isinstance(result, str) else str(result or "")
 
     async def snapshot(self, tab_id: int | None = None) -> SnapshotResult:
         """DOM Snapshot holen."""
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             raise RuntimeError("Driver not initialized")
-        html = await self._page.content()
-        url = self._page.url
-        title = await self._page.title()
-        accessibility = await self._snapshot_accessibility_tree()
+        html = await page.content()
+        url = page.url
+        title = await page.title()
+        accessibility = await self._snapshot_accessibility_tree(page)
         return SnapshotResult(
             html=html,
             url=url,
@@ -784,32 +818,47 @@ class PlaywrightDriver(BrowserDriver):
 
     async def get_page_info(self, tab_id: int | None = None) -> dict[str, Any]:
         """Page Info holen."""
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             raise RuntimeError("Driver not initialized")
         return {
-            "url": self._page.url,
-            "title": await self._page.title(),
+            "url": page.url,
+            "title": await page.title(),
         }
 
     async def navigate(self, url: str, tab_id: int | None = None) -> dict[str, Any]:
         """Navigate zu URL."""
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             raise RuntimeError("Driver not initialized")
         try:
-            response = await self._page.goto(url, wait_until="domcontentloaded")
+            response = await page.goto(url, wait_until="domcontentloaded")
             return {"success": True, "status": response.status if response else 0}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     async def list_tabs(self) -> list[dict[str, Any]]:
-        """Liste Tabs - Playwright unterstützt nur 1 pro Context."""
-        if not self._page:
+        """Liste alle offenen Seiten des persistenten Playwright-Contexts."""
+        pages = await self._refresh_pages()
+        if not pages:
             return []
-        return [{"id": 0, "url": self._page.url, "title": await self._page.title()}]
+        tabs: list[dict[str, Any]] = []
+        for page in pages:
+            tabs.append(
+                {
+                    "id": self._register_page(page),
+                    "windowId": 0,
+                    "url": page.url,
+                    "title": await page.title(),
+                    "active": page is self._page,
+                }
+            )
+        return tabs
 
     async def advanced_stealth(self, tab_id: int | None = None) -> dict[str, Any]:
         """Playwright-Stealth ist bereits aktiv; erneute Härtung ist ein no-op."""
-        if not self._page:
+        page = await self._resolve_page(tab_id)
+        if not page:
             return {"ok": False, "error": "Driver not initialized"}
         return {"ok": True, "applied": True, "mode": "playwright"}
 
@@ -821,6 +870,7 @@ class PlaywrightDriver(BrowserDriver):
             return {"error": "Driver not initialized"}
         if not self._page:
             self._page = await self._context.new_page()
+            self._register_page(self._page)
         if url:
             await self._page.goto(url, wait_until="domcontentloaded")
         if active:
@@ -828,7 +878,12 @@ class PlaywrightDriver(BrowserDriver):
                 await self._page.bring_to_front()
             except Exception:
                 pass
-        return {"tabId": 0, "windowId": 0, "url": self._page.url, "active": active}
+        return {
+            "tabId": self._register_page(self._page),
+            "windowId": 0,
+            "url": self._page.url,
+            "active": active,
+        }
 
     async def close(self) -> None:
         """Räume Playwright Resources auf."""
