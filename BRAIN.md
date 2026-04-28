@@ -249,6 +249,11 @@ screencapture -x /tmp/step.png && sips -Z 512 /tmp/step.png --out /tmp/step_s.pn
 → triggert Safety-Filter. Stattdessen normal fragen: "Where is the first button? Give pixel coords."
 Der Filter reagiert auf den PROMPT-STIL, nicht auf den Bildinhalt!
 
+**⚠️ Wichtig Screenshot:** Immer NUR das Chrome-Fenster croppen vor 90B-Analyse!
+→ Full-Screen (1464×823) hat zu viele Fenster → 90B verwirrt
+→ Chrome-Crop (768×576) → 90B gibt präzise Koordinaten
+→ Dann Koordinaten zurückskalieren auf Full-Screen für MCP-Klick
+
 **Puter.js:** 100% kostenlos (User-Pays). REST-API blockiert. Node.js-SDK hat WebSocket-Bug. Nur Browser.
 
 
