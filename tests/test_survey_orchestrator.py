@@ -536,9 +536,11 @@ async def test_v2_begin_dismisses_obvious_modal_before_scanning(monkeypatch, bri
     bridge.side_effect = [
         {"items": []},
         {"ok": True},
+        {"items": [{"selector": "div.survey-item", "text": "0,23 € · 1 Minute", "ref": "e2", "id": "survey-42"}]},
+        {"ok": True},
+        {"ok": True},
         {"items": [{"selector": "button.close", "text": "×", "ref": "e1"}]},
-        {"items": [{"selector": "div.card", "text": "0,23 € · 1 Minute", "ref": "e2"}]},
-        {"url": "https://www.heypiggy.com/survey/42"},
+        {"ok": True},
     ]
     orch = SurveyOrchestrator(
         execute_bridge=bridge,
@@ -558,3 +560,58 @@ async def test_v2_begin_dismisses_obvious_modal_before_scanning(monkeypatch, bri
     assert orch.state == QueueState.RUNNING
     methods = [call.args[0] for call in bridge.await_args_list]
     assert "click_ref" in methods
+
+
+async def test_v2_dashboard_rejects_cashout_link(monkeypatch, bridge, tmp_history):
+    monkeypatch.setenv("OPENSIN_V2", "1")
+    monkeypatch.setattr(
+        SurveyOrchestrator,
+        "_page_signature",
+        AsyncMock(
+            side_effect=[
+                {"url": "https://www.heypiggy.com/", "title": "Dashboard", "readyState": "complete", "textHash": "1", "htmlHash": "1"},
+                {"url": "https://www.heypiggy.com/", "title": "Dashboard", "readyState": "complete", "textHash": "1", "htmlHash": "1"},
+                {"url": "https://www.heypiggy.com/survey/99", "title": "Survey 99", "readyState": "complete", "textHash": "2", "htmlHash": "2"},
+                {"url": "https://www.heypiggy.com/survey/99", "title": "Survey 99", "readyState": "complete", "textHash": "2", "htmlHash": "2"},
+                {"url": "https://www.heypiggy.com/survey/99", "title": "Survey 99", "readyState": "complete", "textHash": "2", "htmlHash": "2"},
+                {"url": "https://www.heypiggy.com/survey/99", "title": "Survey 99", "readyState": "complete", "textHash": "2", "htmlHash": "2"},
+                {"url": "https://www.heypiggy.com/survey/99", "title": "Survey 99", "readyState": "complete", "textHash": "2", "htmlHash": "2"},
+                {"url": "https://www.heypiggy.com/survey/99", "title": "Survey 99", "readyState": "complete", "textHash": "2", "htmlHash": "2"},
+                {"url": "https://www.heypiggy.com/survey/99", "title": "Survey 99", "readyState": "complete", "textHash": "2", "htmlHash": "2"},
+                {"url": "https://www.heypiggy.com/survey/99", "title": "Survey 99", "readyState": "complete", "textHash": "2", "htmlHash": "2"},
+            ]
+        ),
+    )
+    bridge.side_effect = [
+        {"items": []},
+        {"ok": True},
+        {"items": [
+            {"selector": "div.survey-item", "text": "0,50 € · 2 Minuten", "ref": "cashout_link", "id": "survey-1", "href": "?page=cashout"},
+            {"selector": "div.survey-item", "text": "5,00 € Auszahlen", "ref": "cashout_btn", "id": "survey-cashout"},
+            {"selector": "div.survey-item", "text": "0,23 € · 1 Minute", "ref": "real_survey", "id": "survey-99"},
+        ]},
+        {"ok": True},
+        {"ok": True},
+        {"items": []},
+    ]
+    orch = SurveyOrchestrator(
+        execute_bridge=bridge,
+        tab_params_factory=lambda: {},
+        dashboard_url="https://www.heypiggy.com/",
+        explicit_urls=[],
+        autodetect=True,
+        max_surveys=5,
+        cooldown_sec=0.0,
+        cooldown_jitter=0.0,
+        history_path=tmp_history,
+    )
+
+    record = await orch.begin()
+
+    assert record is not None
+    assert orch.state == QueueState.RUNNING
+    methods = [call.args[0] for call in bridge.await_args_list]
+    click_ref_calls = [c for c in bridge.await_args_list if c.args[0] == "click_ref"]
+    assert len(click_ref_calls) >= 1
+    clicked_ref = click_ref_calls[0].kwargs.get("ref", "") or click_ref_calls[0].args[1].get("ref", "")
+    assert clicked_ref == "real_survey", f"Expected real_survey but got {clicked_ref}"

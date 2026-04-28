@@ -46,6 +46,7 @@ import asyncio
 import json
 import os
 import random
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -233,33 +234,33 @@ class SurveyOrchestrator:
     """
 
     HIGHEST_REWARD_JS = r"""
-    (function() {
-      // Findet die lukrativste verfügbare Survey auf dem Dashboard
-      var items = Array.from(document.querySelectorAll('.survey-item, [id^="survey-"]'));
-      if (!items.length) return { found: false };
-      var best = null;
-      var bestVal = -1;
-      for (var i = 0; i < items.length; i++) {
-        var el = items[i];
-        var txt = el.textContent || '';
-        var m = txt.match(/(\d+[\.,]?\d*)\s*€/);
-        if (!m) continue;
-        var val = parseFloat(m[1].replace(',', '.'));
-        if (isNaN(val)) continue;
-        if (val > bestVal) {
-          bestVal = val;
-          best = el;
-        }
-      }
-      if (!best) return { found: false };
-      return {
-        found: true,
-        selector: best.id ? ('#' + best.id) : 'div.survey-item',
-        reward: bestVal + '€',
-        text: (best.textContent || '').substring(0, 120).trim()
-      };
-    })();
-    """
+(function() {
+var items = Array.from(document.querySelectorAll('.survey-item, [id^="survey-"]'));
+if (!items.length) return { found: false };
+var forbidden = /cashout|auszahlen|gift.?card|geschenkkarte|einstellungen|settings|profil|profile|faq|hilfe|help|support|abmelden|logout|sign.?out|referral|empfehl/i;
+var best = null;
+var bestVal = -1;
+for (var i = 0; i < items.length; i++) {
+var el = items[i];
+var txt = el.textContent || '';
+if (forbidden.test(txt)) continue;
+var href = el.getAttribute('href') || '';
+if (forbidden.test(href)) continue;
+var m = txt.match(/(\d+[\.,]?\d*)\s*€/);
+if (!m) continue;
+var val = parseFloat(m[1].replace(',', '.'));
+if (isNaN(val)) continue;
+if (val > bestVal) { bestVal = val; best = el; }
+}
+if (!best) return { found: false };
+return {
+found: true,
+selector: best.id ? ('#' + best.id) : 'div.survey-item',
+reward: bestVal + '€',
+text: (best.textContent || '').substring(0, 120).trim()
+};
+})();
+"""
 
     PAGE_SIGNATURE_JS = r"""
     (() => {
@@ -690,17 +691,24 @@ class SurveyOrchestrator:
                 result = await self._bridge(
                     "dom.queryAll",
                     {
-                        "selector": "button, a, [role='button'], div, article, li, section",
+                        "selector": "#survey_list .survey-item, div.survey-item, [id^='survey-'], .survey-card, [data-survey-id], .survey-item a, .survey-card a",
                         **self._tab_params(),
                     },
                 )
                 items = result.get("items", []) if isinstance(result, dict) else []
                 if not isinstance(items, list) or not items:
+                    self._audit("queue_dashboard_no_survey_cards_v2", item_count=0)
                     return None
 
-                def _price(text: str) -> float | None:
-                    import re
+                # VERBOTEN: Header/Nav-Links die vom Survey-Flow ablenken
+                _FORBIDDEN = re.compile(
+                    r"cashout|auszahlen|gift.?card|geschenkkarte|einstellungen|settings|"
+                    r"profil|profile|faq|hilfe|help|support|abmelden|logout|sign.?out|"
+                    r"referral|empfehl|einlad|invite|dashboard",
+                    re.IGNORECASE,
+                )
 
+                def _price(text: str) -> float | None:
                     m = re.search(r"(\d+[.,]\d+)\s*€", text)
                     if not m:
                         return None
@@ -715,10 +723,23 @@ class SurveyOrchestrator:
                     if not isinstance(item, dict):
                         continue
                     text = str(item.get("text", "") or "")
-                    price = _price(text)
-                    if price is None:
+                    href = str(item.get("href", "") or "").lower()
+                    # Filtere Cashout/Nav-Elemente
+                    if _FORBIDDEN.search(text) or _FORBIDDEN.search(href):
                         continue
-                    if price > best_price:
+                    # Element muss eine Survey-Karte sein (id oder selector Pattern)
+                    item_id = str(item.get("id", "") or "").strip()
+                    selector = str(item.get("selector", "") or "").strip()
+                    is_survey_card = (
+                        item_id.startswith("survey-")
+                        or "survey-item" in selector
+                        or "survey-card" in selector
+                        or "data-survey-id" in selector
+                    )
+                    price = _price(text)
+                    if not is_survey_card and price is None:
+                        continue
+                    if price is not None and price > best_price:
                         best_item = item
                         best_price = price
 
@@ -727,14 +748,16 @@ class SurveyOrchestrator:
                         if not isinstance(item, dict):
                             continue
                         text = str(item.get("text", "") or "").lower()
+                        href = str(item.get("href", "") or "").lower()
+                        if _FORBIDDEN.search(text) or _FORBIDDEN.search(href):
+                            continue
                         if any(
                             token in text
                             for token in ("survey", "umfrage", "erhebung", "fragebogen")
                         ):
                             best_item = item
                             break
-                    if best_item is None:
-                        best_item = items[0] if isinstance(items[0], dict) else None
+
                 return _normalize_native_item(best_item) if isinstance(best_item, dict) else None
             except Exception as e:
                 self._audit("queue_dashboard_scan_error_v2", error=str(e))

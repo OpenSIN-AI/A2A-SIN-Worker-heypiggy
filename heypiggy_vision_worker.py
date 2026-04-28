@@ -4240,21 +4240,27 @@ async def dom_prescan():
                 seenElements.push(card);
             }
 
-            // STUFE 2: Generische klickbare Elemente, auf 25 gekappt
-            var all = document.querySelectorAll(
-                '[onclick], [role="button"], a[href], button, input[type="submit"], [style*="cursor: pointer"], [class*="card"], [class*="survey"]'
-            );
-            var added = 0;
-            for (var i = 0; i < all.length && added < 25; i++) {
-                var el = all[i];
-                if (seenElements.indexOf(el) !== -1) continue;
-                var info2 = describe(el);
-                if (!info2) continue;
-                info2.priority = 'generic';
-                results.push(info2);
-                seenElements.push(el);
-                added++;
-            }
+    // STUFE 2: Generische klickbare Elemente, auf 25 gekappt
+    // WHY: Header-Navigation (Cashout, Giftcard, Profil, Einstellungen) fuehrt
+    // weg vom Survey-Flow. Der Vision-LLM klickt sonst auf "Auszahlen" statt
+    // auf eine Survey-Karte. Diese Elemente muessen gefiltert werden.
+    var forbiddenPatterns = /cashout|auszahlen|gift.?card|geschenkkarte|einstellungen|settings|profil|profile|faq|hilfe|help|support|abmelden|logout|sign.?out|referral|empfehl/i;
+    var all = document.querySelectorAll(
+        '[onclick], [role="button"], a[href], button, input[type="submit"], [style*="cursor: pointer"], [class*="card"], [class*="survey"]'
+    );
+    var added = 0;
+    for (var i = 0; i < all.length && added < 25; i++) {
+        var el = all[i];
+        if (seenElements.indexOf(el) !== -1) continue;
+        var info2 = describe(el);
+        if (!info2) continue;
+        // VERBOTEN: Header/Nav-Links die vom Survey-Flow ablenken
+        if (forbiddenPatterns.test(info2.text || '')) continue;
+        info2.priority = 'generic';
+        results.push(info2);
+        seenElements.push(el);
+        added++;
+    }
             return results;
         })();
         """
@@ -6194,6 +6200,12 @@ PAGE STATE REGELN — KRITISCH:
 - "survey_done" → Umfrage erfolgreich abgeschlossen, Bestätigungsseite (eine weitere Umfrage wird automatisch folgen!)
 - "error" → Fehlermeldung, Timeout oder unbekannter Zustand
 - "unknown" → Seite nicht klar erkennbar
+
+DASHBOARD-VERBOTE — ABSOLUT KRITISCH:
+- NIEMALS auf "Auszahlen", "Cashout", "Geschenkkarte", "Giftcard", "Einstellungen", "Profil", "Hilfe", "FAQ" klicken!
+- Diese Header/Nav-Links fuehren WEG vom Survey-Flow — sie sind ZEITVERSCHWENDUNG!
+- Auf dem Dashboard: NUR auf Survey-Karten (.survey-item, #survey-XXXXXX) klicken!
+- Wenn ein DASHBOARD-RANKING Block oben steht: IMMER die TOP-1 Karte klicken!
 
 MEDIA-FRAGEN REGELN — KRITISCH:
 - Wenn ein MEDIA-ANALYSE Block oben steht: NUTZE IHN! Die Audio-Transkripte und Video-Beschreibungen zeigen dir genau was gefragt wird.
