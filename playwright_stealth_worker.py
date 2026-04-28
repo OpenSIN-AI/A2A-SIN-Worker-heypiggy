@@ -38,7 +38,10 @@ from playwright_stealth.stealth import Stealth
 
 
 CHROME_USER_DATA_DIR = Path.home() / "Library/Application Support/Google/Chrome"
-PLAYWRIGHT_PROFILE_STORE = Path.home() / ".heypiggy" / "playwright_profile_clone"
+# ── ECHTES Chrome Default-Profil (NUR das funktioniert!) ─────────────────
+# KEIN Klon, KEIN playwright_profile_clone, KEIN CDP, KEIN Bridge.
+# NUR das echte Chrome-Profil des Nutzers.
+PLAYWRIGHT_PROFILE_STORE = Path.home() / "Library/Application Support/Google/Chrome"
 WINDOW_WIDTH = 1024
 WINDOW_HEIGHT = 768
 

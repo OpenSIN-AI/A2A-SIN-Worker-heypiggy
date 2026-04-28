@@ -6,15 +6,47 @@
 
 ---
 
-## 1. Architektur-Regel #1: DESKTOP-CONTROL STATT BRIDGE
+## 1. Architektur-Regel #1: NUR ECHTES CHROME DEFAULT-PROFIL
 
-**⚠️ BRIDGE MCP IST KAPUTT (28. April 2026).**
-Die Bridge MCP (Chrome Extension + HF Spaces Relay) funktioniert nicht
-zuverlässig. Sie verliert Tabs, bricht Sessions ab und ist unwartbar.
+**🚨 KRITISCH — STAND 28. APRIL 2026, 18:15 UHR:**
 
-**Neue Methode: HybridDriver + Desktop Control**
-Wir haben eine NEUE Architektur gebaut, die OHNE Bridge auskommt:
+**BRIDGE MCP IST TOT.**
+**PLAYWRIGHT PROFIL-CLONE IST FALSCH.**
+**ES GIBT NUR EINE METHODE:**
 
+### Das ECHTE Chrome Default-Profil
+
+```
+~/Library/Application Support/Google/Chrome/Default/
+```
+
+Dieses Profil enthält:
+- Echte Cookies von heypiggy.com (Login-Session)
+- Echte Browser-Fingerprints (Canvas, WebGL, Fonts, etc.)
+- Echte Extensions (keine WebDriver-Marker)
+- Echte Browsing-History
+
+**NUR dieses Profil funktioniert mit HeyPiggy.**
+
+### Was NIEMALS funktioniert:
+
+```
+❌ Bridge MCP (Chrome Extension + HF Spaces)  → KAPUTT, Tabs brechen ab
+❌ playwright_profile_clone (~/.heypiggy/)      → FALSCH, geklontes Profil erkannt
+❌ playwright_stealth_worker.py CDP-Mode        → FALSCH, CDP erkannt
+❌ playwright-stealth JS-Patches                → FALSCH, JS-Level erkannt
+❌ Neues Playwright-Profil                      → FALSCH, keine Session
+❌ Headless Chrome                              → FALSCH, sofort erkannt
+```
+
+### Was FUNKTIONIERT:
+
+```
+✅ Echtes Chrome Default-Profil (~/Library/Application Support/Google/Chrome/Default/)
+✅ Chrome MUSS bereits bei HeyPiggy eingeloggt sein
+✅ Chrome MUSS die Bridge-Extension NICHT installiert haben
+✅ Kein CDP, kein Playwright-Launch, kein Selenium
+✅ Nur native macOS Desktop-Control (AppleScript, screencapture)
 ```
 MacDesktopController (desktop_control.py)
     ├── screencapture (Screenshots per macOS API)
