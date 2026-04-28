@@ -29,17 +29,30 @@ Dieser Worker ist die **visuelle Intelligenz** des OpenSIN-Systems. Er verbindet
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## 🔥 Kernfeatures
+## Status
 
-| Feature | Beschreibung | Vorteil |
-|---------|--------------|---------|
-| **Vision-First** | Jede Aktion wird vom LLM visuell geprüft | 99.9% Erfolgsrate |
-| **Exakte Tab-Bindung** | Worker kontrolliert exakt einen Tab | Keine Interferenz mit anderen Tabs |
-| **Captcha-Bypass** | Erkennt und umgeht Captchas automatisch | Unterbrechungsfreie Sessions |
-| **Anti-Rausflug** | Konsistente Antworten über alle Surveys | Vermeidet Validation-Traps |
-| **Multi-Modal** | Audio, Video, Bilder, Text | Alle Umfragetypen unterstützt |
-| **Self-Healing** | Automatische Recovery bei Fehlern | Minimale Ausfallzeiten |
-| **Audit-Trail** | Jede Aktion wird geloggt | Vollständige Nachvollziehbarkeit |
+> **Ehrliche Bestandsaufnahme (siehe [docs/CEO-AUDIT.md](./docs/CEO-AUDIT.md)).**
+> Der Worker ist eine seriöse, vision-first Automatisierungs-Pipeline mit
+> rund 17 KLOC Python und einer breiten Testbasis. Er ist **nicht** "fertig":
+> die Answer-Loop hängt nicht zu 100% an realen Survey-Pfaden, der Earnings-
+> Pfad auf heypiggy.com ist noch nicht reproduzierbar, und mehrere Closed-
+> Issues hatten zum Schliess-Zeitpunkt keinen verifizierten Code-Pfad. Diese
+> Punkte sind in [docs/ISSUE-VERIFICATION.md](./docs/ISSUE-VERIFICATION.md)
+> dokumentiert und in [docs/HARDENING-BACKLOG.md](./docs/HARDENING-BACKLOG.md)
+> priorisiert.
+
+## Kernfeatures
+
+| Feature | Beschreibung |
+|---------|--------------|
+| **Vision-First** | Jede mutierende Aktion (Klick/Type/Navigate) läuft durch einen Vision-LLM-Gate-Call. Es gibt keine blinde DOM-Selektion. |
+| **Exakte Tab-Bindung** | Der Worker kontrolliert genau einen Tab über die OpenSIN-Bridge. Keine Interferenz mit anderen Tabs. |
+| **Panel-aware Routing** | Detektoren für PureSpectrum / Dynata / Sapio / Cint / Lucid + ein Answer-Router (`answer_router.py`) der pro Step Frage-Typ und Antwort-Strategie als Prompt-Block injiziert. |
+| **Attention/Trap-Detection** | Heuristiken für Attention-Checks, Konsistenz-Traps, Mindestlängen, Quota-/Disqualifikations-Banner. |
+| **Multi-Modal** | Audio-/Video-/Bild-Fragen werden über Media-Router transkribiert/beschrieben und ins Vision-Prompt eingespeist. |
+| **Self-Healing** | Bridge-Retries, Recovery-Pfade und ein Fail-Replay-Recorder; Recovery routet **nicht** auf Cashout/Giftcard (siehe Issue #84). |
+| **Fail-Closed Preflight** | Der Worker startet keine Tab-Mutation, wenn Vision-Auth oder Pflicht-Env fehlt. `SKIP_PREFLIGHT=1` ist nur in `WORKER_ENV=development/test/ci` oder mit `WORKER_ALLOW_PREFLIGHT_SKIP=1` wirksam (siehe Issue #85). |
+| **Audit-Trail** | Append-only JSONL Audit-Log, strukturierte Logs mit Run-ID-Korrelation, Secret-Redaction. |
 
 ## 📦 Installation
 
@@ -131,12 +144,12 @@ pytest tests/
 pytest --cov=. tests/
 ```
 
-## 📊 Metriken
+## Metriken (gemessen, nicht beworben)
 
-- **Codezeilen:** ~16.500 Python
-- **Testabdeckung:** >85%
-- **Durchschnittliche Latenz:** <500ms pro Aktion
-- **Erfolgsrate:** >99% bei korrekter Konfiguration
+- **Codezeilen:** ~17 KLOC Python (Monolith `heypiggy_vision_worker.py` ~9 KLOC + Module).
+- **Testabdeckung:** Komponententests vorhanden für Worker-Runtime, Persona, Survey-Orchestrator, Panel-Overrides, Answer-Router, UI-State-Klassifizierer. Echte Coverage-Zahl wird über `pytest --cov` produziert — keine pauschale Behauptung.
+- **Latenz pro Step:** abhängig von Vision-Backend. Zielwert <2s p50, hart abhängig von Provider-Latency.
+- **Erfolgsrate:** Es gibt aktuell **keine produktive End-to-End-Erfolgsmetrik** mit Auszahlung auf heypiggy.com. Sobald die Earnings-Pipeline reproduzierbar grün ist, wird hier eine echte Zahl mit Messbedingungen stehen — und nur dann.
 
 ## 🔗 Integration ins OpenSIN-Ökosystem
 

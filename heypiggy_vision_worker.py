@@ -110,6 +110,10 @@ from panel_overrides import (
     build_panel_prompt_block,
     detect_panel,
 )
+from answer_router import (
+    build_router_prompt_block,
+    route_answer,
+)
 from session_store import (
     dump_session as _session_dump,
     restore_session as _session_restore,
@@ -5656,6 +5660,38 @@ async def dom_prescan():
     except Exception as e:
         audit("panel_scan_error", error=str(e))
 
+    # 16b. ANSWER-ROUTER (Issue #81)
+    # WHY: detect_panel() liefert nur Panel-Identitaet + Cheatsheet. Das eigentliche
+    # Routing — "welcher Frage-TYP liegt vor und welche Antwort-Strategie ergibt sich
+    # aus Panel x Persona x Topic" — fehlte bisher. answer_router.route_answer()
+    # produziert genau diese Strategie als Prompt-Block (Frage-Typ, Constraints,
+    # Trap-Warnungen, klare DO/DONT-Anweisungen) den Vision unmittelbar verarbeiten
+    # kann.
+    # CONSEQUENCES: Bei Panel-Surveys (Cint/Lucid/Dynata/PureSpectrum/Sapio)
+    # bekommt Vision jetzt EINE klare Antwort-Strategie pro Step statt zu raten.
+    # Bei nicht-Panel-Surveys (heypiggy native) ist der Block leer und stoert nicht.
+    router_block = ""
+    try:
+        if _LAST_QUESTION_TEXT:
+            decision = route_answer(
+                question_text=_LAST_QUESTION_TEXT,
+                options=list(_LAST_QUESTION_OPTIONS or []),
+                panel_name=getattr(panel, "name", None) if panel else None,
+                persona=ACTIVE_PERSONA,
+                page_url=_panel_url or "",
+            )
+            router_block = build_router_prompt_block(decision)
+            if router_block:
+                audit(
+                    "answer_routed",
+                    qtype=decision.question_type,
+                    strategy=decision.strategy,
+                    panel=getattr(panel, "name", "n/a") if panel else "n/a",
+                    confidence=round(decision.confidence, 2),
+                )
+    except Exception as e:
+        audit("answer_router_error", error=str(e))
+
     # 17. ATTENTION-CHECK AUTO-SOLVER
     # WHY: Panels bauen explizite Attention-Checks ein: "Um zu zeigen dass Sie
     # aufmerksam sind, waehlen Sie bitte 'Stimme zu'". Wer die falsche Option
@@ -5871,6 +5907,7 @@ async def dom_prescan():
                 required_block,
                 earnings_block,
                 panel_block,
+                router_block,
                 attention_block,
                 minlen_block,
                 errbanner_block,
@@ -7846,17 +7883,38 @@ async def main():
     else:
         audit("state_change", message="Playwright driver aktiv; Bridge-Wait übersprungen")
 
-    # 2. PRE-FLIGHT — Pflicht-Env + Vision-Auth müssen VOR Browser-Mutation healthy sein
-    # SKIP_PREFLIGHT=1 umgeht den Vision-Probe (nuetzlich wenn Auth noch nicht ready)
-    skip_preflight = os.environ.get("SKIP_PREFLIGHT", "").lower() in (
+    # 2. PRE-FLIGHT — Pflicht-Env + Vision-Auth müssen VOR Browser-Mutation healthy sein.
+    # WHY (Issue #85): "fail closed" heisst, dass der Bypass nicht durch ein einzelnes
+    # ENV-Var (SKIP_PREFLIGHT=1) ausgehebelt werden darf. Wir verlangen zusaetzlich
+    # eine explizite dev/test/CI-Umgebung ODER ein zweites, eindeutig-benanntes Flag.
+    # Damit kann ein versehentlich uebergebenes SKIP_PREFLIGHT in Produktion KEINE
+    # Sicherheit aushebeln.
+    _skip_raw = os.environ.get("SKIP_PREFLIGHT", "").lower() in ("1", "true", "yes")
+    _worker_env = os.environ.get("WORKER_ENV", "").lower()
+    _explicit_allow = os.environ.get("WORKER_ALLOW_PREFLIGHT_SKIP", "").lower() in (
         "1",
         "true",
         "yes",
     )
+    skip_preflight = _skip_raw and (
+        _worker_env in {"dev", "development", "test", "ci"} or _explicit_allow
+    )
+    if _skip_raw and not skip_preflight:
+        audit(
+            "warning",
+            message=(
+                "SKIP_PREFLIGHT=1 IGNORIERT — fail-closed bleibt aktiv. "
+                "Setze zusaetzlich WORKER_ENV=development oder "
+                "WORKER_ALLOW_PREFLIGHT_SKIP=1 wenn das Skip wirklich gewollt ist."
+            ),
+            worker_env=_worker_env or "(unset)",
+        )
     if skip_preflight:
         audit(
             "warning",
             message="Preflight uebersprungen (SKIP_PREFLIGHT=1) — Vision Calls werden fehlschlagen!",
+            worker_env=_worker_env or "(unset)",
+            explicit_allow=_explicit_allow,
         )
     else:
         preflight = await ensure_worker_preflight()

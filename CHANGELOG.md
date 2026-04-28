@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Strategy Reset Pass, 2026-04-28)
+
+- **`docs/PLANS/00-NORTHSTAR.md`** — strategische Nordstern-Doku.
+  Architektur-Vision, Verantwortlichkeitsmatrix mit
+  [SIN-CLIs/unmask-cli](https://github.com/SIN-CLIs/unmask-cli) und
+  [SIN-CLIs/playstealth-cli](https://github.com/SIN-CLIs/playstealth-cli).
+- **`docs/PLANS/01-INTEGRATION-UNMASK-PLAYSTEALTH.md`** — verbindlicher
+  Integrations-Plan gegen die zwei Schwester-CLIs (JSON-RPC für unmask,
+  Subprocess für playstealth).
+- **`docs/PLANS/02-AI-BACKEND-STRATEGY.md`** — ehrliche Bewertung
+  Vercel AI Gateway (primary) vs. Puter (optionaler Fallback). **Nein,
+  Puter ist nicht der richtige Primary-Backend für einen headless Earnings-
+  Worker** — Begründung mit Quellen.
+- **`docs/PLANS/03-EARNINGS-PROOF-PIPELINE.md`** — der Geld-Pfad. Solange
+  der nicht reproduzierbar grün ist, ist alles andere Theater.
+- **`docs/PLANS/04-MIGRATION-ROADMAP.md`** — Phasen 0-5 mit harten
+  Phase-Gates.
+- **`docs/ISSUES-TO-CREATE.md`** — Copy-paste-fertige Issue-Templates für
+  fünf EPICs (E1 Earnings, E2 Integration, E3 AI-Backend, E4 Pre-existing
+  Test-Fails, E5 Productization) plus Cross-Repo-Issues gegen unmask + playstealth.
+- **`worker/integrations/__init__.py`** — neues Adapter-Paket.
+- **`worker/integrations/unmask_client.py`** — Async JSON-RPC 2.0 Client
+  Skeleton für unmask-cli. Strikt typisierte ``UnmaskResponse``-Parser,
+  abstrakter Transport-Layer (stdio / HTTP+WS), JSON-RPC-Envelope-
+  Validator. Bodies der RPC-Calls sind Phase 2 — die Surface ist heute
+  vertraglich gepinnt.
+- **`worker/integrations/playstealth_client.py`** — Subprocess-Client-
+  Skeleton für playstealth-cli. Exit-Code-Klassifikation, atomar gelesener
+  State-File, Argument-Validation greift heute schon.
+- **`worker/ai/__init__.py`**, **`worker/ai/backend.py`** — AI-Backend-
+  Selektor mit ``AIGatewayBackend`` (primary) und ``PuterFallbackBackend``
+  (optional). Selektor verweigert Vision-Calls über den Puter-Fallback.
+- **`tests/test_integrations_skeletons.py`** — 36 Contract-Tests für die
+  drei Skeletons. Alle grün.
+
+### Added (Audit + Answer-Loop Pass, 2026-04-28)
+
+- **`answer_router.py`** — neuer **provider-aware Question Router** (Issue #81).
+  Erkennt Fragetyp (single/multi/likert/grid/numeric/openend/screener/attention/
+  consistency_trap), wählt eine Strategie unter Berücksichtigung von Panel
+  (Cint/Lucid/Dynata/PureSpectrum/Sapio) und Persona, und produziert einen
+  kompakten Prompt-Block mit harten DO/DONT-Regeln. Wird im Worker direkt
+  nach `panel_overrides.detect_panel()` aufgerufen und in das Vision-Prompt
+  als `router_block` injiziert. Trap-Erkennung (Konsistenz, Attention,
+  unmögliche Behauptungen) ist eingebaut. Volle Test-Coverage in
+  `tests/test_answer_router.py`.
+- **`docs/CEO-AUDIT.md`** — ungeschönte CEO-Bewertung von Funktionalität,
+  UX, Innovation, Wettbewerb, Marktreife, Top-Risiken und Geschäftsmodell-
+  Realität. Keine Schönfärberei.
+- **`docs/ISSUE-VERIFICATION.md`** — Code-basierte Verifikation, ob die
+  zuletzt geschlossenen Issues #80, #84, #85 wirklich umgesetzt sind oder
+  nur cosmetic geschlossen wurden. Mit Datei + Zeilenangaben.
+- **`docs/RUNBOOK.md`** — Operations-Runbook (Preflight, Bypass-Regeln,
+  Triage-Pfade, Verifikations-Checks).
+- **`docs/HARDENING-BACKLOG.md`** — priorisierter SOTA-Backlog mit harten
+  Akzeptanz-Kriterien.
+
+### Changed (Audit + Answer-Loop Pass, 2026-04-28)
+
+- **`heypiggy_vision_worker.py` — `SKIP_PREFLIGHT` echter fail-closed Modus
+  (Issue #85).** Ein bloßes `SKIP_PREFLIGHT=1` reicht nicht mehr aus, um den
+  Vision-Auth-Preflight zu umgehen. Es wird zusätzlich `WORKER_ENV` aus
+  `{dev, development, test, ci}` ODER ein explizites
+  `WORKER_ALLOW_PREFLIGHT_SKIP=1` verlangt. In allen anderen Fällen wird das
+  Skip ignoriert und im Audit-Log mit `worker_env` markiert.
+- **`README.md`** — Marketing-Bullshit raus. Statt "99.9% Erfolgsrate" steht
+  jetzt eine ehrliche Status-Zusammenfassung mit Verlinkung auf den CEO-
+  Audit, die Issue-Verifikation und den Hardening-Backlog. Feature-Tabelle
+  beschreibt was wirklich existiert.
+
 ### Changed
 
 - **Hardened `worker/` package** — consumed external feedback and tightened typing + docs:
