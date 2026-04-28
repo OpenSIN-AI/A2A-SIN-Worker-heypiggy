@@ -6,7 +6,27 @@
 
 ---
 
-## 1. Architektur-Regel #1: BRIDGE MCP + ECHTES CHROME DEFAULT-PROFIL
+## 1. Architektur-Regel #1: computer-use-mcp STATT Bridge
+
+**🔥 BRIDGE IST TOT — LANG LEBE computer-use-mcp! (28.4.2026, 22:30)**
+
+Die Bridge-Extension war eine Sackgasse. Wir haben etwas VIEL BESSERES:
+
+**computer-use-mcp** von Adam Jones (domdomegg), MIT-Lizenz, Open Source.
+- URL: https://github.com/domdomegg/computer-use-mcp
+- npm: `npx -y computer-use-mcp` (keine Installation!)
+- Technologie: nut.js (cross-platform)
+- 390+ Downloads/Woche, 15 Versionen
+
+**Ersetzt ALLE unsere Tools:**
+- `screencapture` → `get_screenshot`
+- `cliclick` → `mouse_move` + `left_click`
+- `osascript keystroke` → `key` + `type`
+
+**Protokoll:** MCP (JSON-RPC 2.0 über stdin/stdout)
+**Integration:** `mcp_survey_runner.py` im Repo
+
+### Was NIEMALS funktioniert:
 
 **✅ BRIDGE LEBT — STAND 28. APRIL 2026, 21:15 UHR:**
 
