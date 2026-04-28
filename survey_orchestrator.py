@@ -383,11 +383,20 @@ text: (best.textContent || '').substring(0, 120).trim()
 
         await self._navigate_to(next_url)
         await self._dismiss_obvious_modal()
+
+        # ── unmask Pre-Flight Scan ─────────────────────────────────────
+        # Analyse der Survey-Seite BEVOR wir interagieren.
+        # Erkennt Panel, Fallen, Belohnung & Risiko.
+        preflight = await self._preflight_scan(next_url)
+        # ─────────────────────────────────────────────────────────────────
+
         record = SurveyRecord(
             index=len(self._records) + 1,
             start_url=next_url,
             start_time=time.monotonic(),
         )
+        # Speichere Preflight-Daten für spätere Nutzung
+        record._preflight = preflight  # type: ignore[attr-defined]
         self._records.append(record)
         self._current = record
         self._state = QueueState.RUNNING
@@ -958,6 +967,44 @@ text: (best.textContent || '').substring(0, 120).trim()
                 return last_signature
 
             await asyncio.sleep(poll_sec)
+
+    async def _preflight_scan(self, url: str) -> dict[str, object] | None:
+        """
+        Pre-Flight Survey-Analyse via unmask-cli (wenn verfügbar).
+        Erkennt Panel, Fallen, Belohnung und Risiko VOR der Interaktion.
+        """
+        try:
+            from heypiggy_preflight import UnmaskClient
+
+            client = UnmaskClient()
+            analysis = await client.scan_survey_page(url)
+            result: dict[str, object] = {
+                "panel_id": analysis.panel_id,
+                "panel_confidence": analysis.panel_confidence,
+                "traps": analysis.traps,
+                "amount_eur": analysis.amount_eur,
+                "time_min": analysis.time_minutes,
+                "eur_per_hour": analysis.eur_per_hour,
+                "dq_probability": analysis.dq_probability,
+                "risk_level": analysis.risk_level,
+                "risk_factors": analysis.risk_factors,
+                "question_types": analysis.question_types,
+                "should_skip": analysis.should_skip,
+            }
+            self._audit(
+                "preflight_scan",
+                url=url,
+                panel=analysis.panel_id,
+                risk=analysis.risk_level,
+                eur_h=analysis.eur_per_hour,
+            )
+            return result
+        except ImportError:
+            self._audit("preflight_scan_unavailable", url=url)
+            return None
+        except Exception as exc:
+            self._audit("preflight_scan_error", url=url, error=str(exc))
+            return None
 
     async def _navigate_to(self, url: str) -> None:
         try:
