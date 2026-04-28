@@ -6,22 +6,45 @@
 
 ---
 
-## 1. Architektur-Regel #1: NIE DIREKT CHROME ÖFFNEN
+## 1. Architektur-Regel #1: DESKTOP-CONTROL STATT BRIDGE
 
-**Warum:** HeyPiggy erkennt direkte Browser-Launches (CDP, Playwright, Selenium)
-und zeigt dann KEINE Umfragen mehr an. Der Bot-Detection-Algorithmus prüft auf
-`navigator.webdriver`, CDP-Ports und Headless-Indikatoren.
+**⚠️ BRIDGE MCP IST KAPUTT (28. April 2026).**
+Die Bridge MCP (Chrome Extension + HF Spaces Relay) funktioniert nicht
+zuverlässig. Sie verliert Tabs, bricht Sessions ab und ist unwartbar.
 
-**Richtiger Weg:** Immer über die **Bridge MCP** (Chrome Extension) arbeiten.
-Die Bridge läuft im normalen Chrome-Profil des Nutzers — HeyPiggy sieht einen
-echten menschlichen Browser.
+**Neue Methode: HybridDriver + Desktop Control**
+Wir haben eine NEUE Architektur gebaut, die OHNE Bridge auskommt:
 
 ```
-❌ FALSCH:  python playwright_stealth_worker.py  (direkter Chrome-Launch)
-✅ RICHTIG: BRIDGE_MCP_URL=... heypiggy-worker run  (via Bridge Extension)
+MacDesktopController (desktop_control.py)
+    ├── screencapture (Screenshots per macOS API)
+    ├── osascript (Click/Type/Keystroke per AppleScript)
+    ├── Koordinatensteuerung (Pixel-genaue Mausklicks)
+    └── Keyboard-Control (native Tastatureingaben)
+
+HybridDriver (driver_interface.py)
+    ├── PlaywrightDriver (normales Playwright)
+    ├── DesktopDriver (MacDesktopController)
+    └── HybridDriver (Playwright + Desktop-Fallback)
 ```
 
-**Bridge URL (Default):** `https://openjerro-opensin-bridge-mcp.hf.space/mcp`
+**Workflow:**
+1. **Persistentes Chrome-Profil** (`~/.heypiggy/playwright_profile_clone`) nutzen
+2. **Session-Cache** (`~/.heypiggy/session_cache.json`) replayen → kein Login nötig
+3. **HybridDriver** startet Playwright, fällt bei Problemen auf Desktop-Control zurück
+4. **NIE Bridge MCP verwenden** — sie ist broken und deprecated
+
+**Warum direktes Chrome hier OK ist:**
+Der `playwright_stealth_worker.py` nutzt ein GEKLONTES Chrome-Profil
+(`prepare_playwright_user_data_dir()`), das von einem echten menschlichen
+Chrome-Profil kopiert wurde. Das Profil enthält echte Cookies, Extensions
+und Browser-Fingerprints — HeyPiggy sieht einen normalen Nutzer.
+
+```
+❌ FALSCH:  BRIDGE_MCP_URL=... heypiggy-worker run  (Bridge ist kaputt!)
+✅ RICHTIG: DRIVER_TYPE=hybrid heypiggy-worker run   (Desktop-Control)
+✅ RICHTIG: python playwright_stealth_worker.py       (mit Profil-Clone!)
+```
 
 ---
 
@@ -126,17 +149,16 @@ Haupt-Worker. Aktuell unterstützt:
 export NVIDIA_API_KEY="nvapi-..."
 export HEYPIGGY_EMAIL="..."
 export HEYPIGGY_PASSWORD="..."
+export PYTHONPATH="."
 
-# Bridge (Default: HF Spaces)
-export BRIDGE_MCP_URL="https://openjerro-opensin-bridge-mcp.hf.space/mcp"
-export BRIDGE_HEALTH_URL="https://openjerro-opensin-bridge-mcp.hf.space/health"
+# Desktop Control (NEUE METHODE — Bridge ist deprecated!)
+export DRIVER_TYPE="hybrid"          # playwright + desktop fallback
+export HEYPIGGY_PROFILE_CLONE="1"    # nutze persistentes Profil
 
-# Optional
-export HEYPIGGY_MAX_SURVEYS=25
-export HEYPIGGY_PERSONA="default"
-export HEYPIGGY_COOLDOWN_SEC=4
-export BRAIN_URL="http://127.0.0.1:7070"
-export OPENSIN_BRIDGE_V2=0  # 0=legacy, 1=opt-in V2
+# ⚠️ NICHT MEHR VERWENDEN:
+# export BRIDGE_MCP_URL=...          # Bridge ist kaputt!
+# export BRIDGE_ADAPTER=...          # Bridge ist kaputt!
+# export OPENSIN_BRIDGE_V2=...       # Bridge ist kaputt!
 ```
 
 ---
