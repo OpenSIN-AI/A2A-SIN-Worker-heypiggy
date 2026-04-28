@@ -241,9 +241,13 @@ screencapture -x /tmp/step.png && sips -Z 512 /tmp/step.png --out /tmp/step_s.pn
 ```
 
 **Verfügbare FREE Vision-Modelle (28.4.2026):**
-- ✅ `meta/llama-3.2-11b-vision-instruct` — ~1s, empfohlen
-- ✅ `meta/llama-3.2-90b-vision-instruct` — langsamer (größer)
+- ✅ `meta/llama-3.2-11b-vision-instruct` — ~1s, keine Safety-Filter, ungenaue Koordinaten
+- ✅ `meta/llama-3.2-90b-vision-instruct` — langsamer (~3-5s), PRÄZISE Koordinaten
 - ❌ Alle Phi/Mistral-Vision — EOL 15.4.2026
+
+**⚠️ Wichtig 90B Prompt:** KEINE roboterhaften System-Prompts ("NUR Zahlen! NICHTS anderes!")
+→ triggert Safety-Filter. Stattdessen normal fragen: "Where is the first button? Give pixel coords."
+Der Filter reagiert auf den PROMPT-STIL, nicht auf den Bildinhalt!
 
 **Puter.js:** 100% kostenlos (User-Pays). REST-API blockiert. Node.js-SDK hat WebSocket-Bug. Nur Browser.
 
