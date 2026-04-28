@@ -12,41 +12,73 @@
 
 **BRIDGE MCP IST TOT.**
 **PLAYWRIGHT PROFIL-CLONE IST FALSCH.**
-**ES GIBT NUR EINE METHODE:**
+**KEINE SKRIPTE, KEINE AGENTEN, KEINE WORKER.**
+**NUR SHELL-COMMANDS. EIN COMMAND = EINE AKTION.**
 
-### Das ECHTE Chrome Default-Profil
-
-```
-~/Library/Application Support/Google/Chrome/Default/
-```
-
-Dieses Profil enthält:
-- Echte Cookies von heypiggy.com (Login-Session)
-- Echte Browser-Fingerprints (Canvas, WebGL, Fonts, etc.)
-- Echte Extensions (keine WebDriver-Marker)
-- Echte Browsing-History
-
-**NUR dieses Profil funktioniert mit HeyPiggy.**
-
-### Was NIEMALS funktioniert:
+### Die EINZIGE Methode die funktioniert:
 
 ```
-❌ Bridge MCP (Chrome Extension + HF Spaces)  → KAPUTT, Tabs brechen ab
-❌ playwright_profile_clone (~/.heypiggy/)      → FALSCH, geklontes Profil erkannt
-❌ playwright_stealth_worker.py CDP-Mode        → FALSCH, CDP erkannt
-❌ playwright-stealth JS-Patches                → FALSCH, JS-Level erkannt
-❌ Neues Playwright-Profil                      → FALSCH, keine Session
-❌ Headless Chrome                              → FALSCH, sofort erkannt
+1. Chrome mit ECHTEM Default-Profil öffnen (manuell)
+2. Bei HeyPiggy einloggen (manuell, Session-Cache hält 72h)
+3. JEDEN Schritt als EINZELNEN Shell-Command ausführen:
+   a. screencapture → Screenshot
+   b. Puter AI Free → Bildanalyse (kostenlos, GPT-5.4-nano Vision)
+   c. cliclick → Klick an Koordinaten
+   d. repeat
+4. Jeden erfolgreichen Command als .md in successfull/ speichern
+```
+
+### Warum nur Shell-Commands:
+
+```
+❌ Python-Skripte (worker, agent, orchestrator) → ALLE kaputt
+❌ Bridge MCP → KAPUTT
+❌ playwright_stealth_worker.py → KAPUTT (show "automatisierte Testsoftware")
+❌ playwright_profile_clone → KAPUTT (erkannt als Bot)
+❌ CDP/Playwright-Launch → KAPUTT (webdriver=true)
 ```
 
 ### Was FUNKTIONIERT:
 
 ```
-✅ Echtes Chrome Default-Profil (~/Library/Application Support/Google/Chrome/Default/)
-✅ Chrome MUSS bereits bei HeyPiggy eingeloggt sein
-✅ Chrome MUSS die Bridge-Extension NICHT installiert haben
-✅ Kein CDP, kein Playwright-Launch, kein Selenium
-✅ Nur native macOS Desktop-Control (AppleScript, screencapture)
+✅ Echtes Chrome mit Default-Profil (manuell geöffnet)
+✅ screencapture -x → Screenshot
+✅ Puter AI Free (puter.ai.chat mit gpt-5.4-nano) → kostenlose Bildanalyse
+✅ cliclick c:X,Y → Mausklick an Koordinaten
+✅ osascript → Chrome-Fenster steuern (activate, bounds)
+✅ KEIN VPN! ProtonVPN blockiert HeyPiggy Surveys
+```
+
+### Shell-Command-Toolkit:
+
+```bash
+# Screenshot
+screencapture -x /tmp/step.png
+
+# Puter AI Free Vision (Node.js one-liner)
+cd /tmp && node -e "const p=require('@heyputer/puter.js');(async()=>{const a=await p.ai.chat('Was siehst du?','file:///tmp/step.png',{model:'gpt-5.4-nano'});console.log(a)})()"
+
+# Klick
+cliclick c:X,Y
+
+# Chrome steuern
+osascript -e 'tell application "Google Chrome" to activate'
+osascript -e 'tell application "Google Chrome" to set bounds of front window to {0,0,1024,768}'
+
+# Warten
+sleep 3
+```
+
+### successfull/ Verzeichnis:
+
+Jeder erfolgreiche Command wird als einzelne .md Datei dokumentiert:
+```
+successfull/
+  01-screenshot.md    → Screenshot-Befehl
+  02-vision.md        → Puter AI Vision-Befehl
+  03-click-survey.md  → Klick auf Survey
+  04-verify.md        → Verifikation nach Klick
+  ...
 ```
 MacDesktopController (desktop_control.py)
     ├── screencapture (Screenshots per macOS API)
