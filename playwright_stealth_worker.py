@@ -2,7 +2,7 @@
 # ================================================================================
 # DATEI: playwright_stealth_worker.py
 # PROJEKT: A2A-SIN-Worker-heyPiggy
-# ZWECK: Direkter Playwright+Stealth Worker - NICHT über Bridge!
+# ZWECK: LEGACY Playwright Worker — FÜR HEYPIGGY LIVE VERBOTEN!
 # ================================================================================
 """
 Nuclear Option - Playwright mit Stealth für HeyPiggy!
@@ -18,7 +18,8 @@ Usage:
     export HEYPIGGY_EMAIL="..."
     export HEYPIGGY_PASSWORD="..."
     export NVIDIA_API_KEY="..."
-    python3 playwright_stealth_worker.py
+    # Nur für lokale Fixture-/Debug-Tests, niemals für HeyPiggy live:
+    ALLOW_AUTOMATION_CHROME=1 python3 playwright_stealth_worker.py
 """
 
 import asyncio
@@ -398,7 +399,13 @@ async def _select_active_page(context, fallback_page):
 
 
 async def main():
-    """Haupt-Loop für HeyPiggy mit Playwright+Stealth."""
+    """Legacy loop. Fails closed unless explicitly enabled for non-live tests."""
+
+    if os.environ.get("ALLOW_AUTOMATION_CHROME") != "1":
+        print("🛑 ABORT: playwright_stealth_worker.py startet automatisiertes Chrome.")
+        print("🛑 HeyPiggy zeigt dann keine Umfragen. Nutze NUR normales Chrome Default-Profil + Desktop-Control.")
+        print("🛑 Wenn du lokale Fixtures testest: ALLOW_AUTOMATION_CHROME=1 setzen.")
+        return
 
     print("🚀 Starte Playwright+Stealth Worker...")
 
