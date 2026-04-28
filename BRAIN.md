@@ -12,9 +12,10 @@
 
 Die Bridge-Extension war eine Sackgasse. Wir haben etwas VIEL BESSERES:
 
-**computer-use-mcp** von Adam Jones (domdomegg), MIT-Lizenz, Open Source.
-- URL: https://github.com/domdomegg/computer-use-mcp
-- npm: `npx -y computer-use-mcp` (keine Installation!)
+**computer-use-mcp** — jetzt als SIN-CLIs Fork:
+- Original: domdomegg/computer-use-mcp (Adam Jones, MIT)
+- Unser Fork: https://github.com/SIN-CLIs/computer-use-mcp
+- npm: `npx github:SIN-CLIs/computer-use-mcp`
 - Technologie: nut.js (cross-platform)
 - 390+ Downloads/Woche, 15 Versionen
 

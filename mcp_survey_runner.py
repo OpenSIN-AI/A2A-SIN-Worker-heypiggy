@@ -32,7 +32,7 @@ class MCPSurveyRunner:
     async def start(self):
         """Start MCP server as persistent subprocess."""
         self.proc = await asyncio.create_subprocess_exec(
-            "npx", "-y", "computer-use-mcp",
+            "npx", "github:SIN-CLIs/computer-use-mcp",
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
