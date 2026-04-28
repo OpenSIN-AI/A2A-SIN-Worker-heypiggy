@@ -67,16 +67,20 @@ class MCPSurveyRunner:
                 continue
         return {"error": "no response"}
 
-    async def screenshot(self) -> bytes:
-        """Take screenshot, return PNG bytes."""
+    async def crop_screenshot(self):
+        """Take screenshot, crop Chrome window, return base64."""
         resp = await self._call("tools/call", {
             "name": "computer",
             "arguments": {"action": "get_screenshot"},
         })
         for item in resp.get("result", {}).get("content", []):
             if item["type"] == "image":
-                return base64.b64decode(item["data"])
-        return b""
+                img = Image.open(BytesIO(base64.b64decode(item["data"])))
+                chrome = img.crop((0, 23, 1024, 791))
+                buf = BytesIO()
+                chrome.save(buf, "PNG")
+                return base64.b64encode(buf.getvalue()).decode()
+        return ""
 
     async def click(self, x: int, y: int):
         """Move mouse to (x,y) and left click."""

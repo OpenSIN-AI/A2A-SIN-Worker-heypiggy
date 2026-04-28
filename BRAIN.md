@@ -258,10 +258,15 @@ Der Filter reagiert auf den PROMPT-STIL, nicht auf den Bildinhalt!
 **Coordinate-Formel:**
 ```
 screen_X = 0 + crop_X    # Chrome links bei 0
-screen_Y = 23 + crop_Y   # Chrome top bei 23
+screen_Y = 23 + crop_Y   # Chrome top bei 23 (Menüleiste)
 ```
 
-**Kombiniere Click + Keyboard:** Wenn Klick nicht trifft → Tab/Enter als Fallback
+**⚠️ 90B Koordinaten-Format ist INKONSISTENT:**
+- Manchmal Pixel ("512, 384")
+- Manchmal Prozent ("0.09, 0.25")
+- Immer "pixel" im Prompt erwähnen: "Give PIXEL coordinates on this 1024x768 image"
+
+**Kombiniere Click + Keyboard:** Wenn Klick nicht trifft → `left_click` MIT `coordinate`-Parameter (nicht separate mouse_move+click).
 
 **⚠️ VOR jedem Klick: Auf scrollbare Inhalte prüfen!**
 → HeyPiggy-Umfragen haben oft MEHR Optionen als sichtbar (Scrollbalken)
