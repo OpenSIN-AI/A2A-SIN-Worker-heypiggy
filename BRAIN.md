@@ -6,79 +6,39 @@
 
 ---
 
-## 1. Architektur-Regel #1: NUR ECHTES CHROME DEFAULT-PROFIL
+## 1. Architektur-Regel #1: BRIDGE MCP + ECHTES CHROME DEFAULT-PROFIL
 
-**🚨 KRITISCH — STAND 28. APRIL 2026, 18:15 UHR:**
+**✅ BRIDGE LEBT — STAND 28. APRIL 2026, 21:15 UHR:**
 
-**BRIDGE MCP IST TOT.**
-**PLAYWRIGHT PROFIL-CLONE IST FALSCH.**
-**KEINE SKRIPTE, KEINE AGENTEN, KEINE WORKER.**
-**NUR SHELL-COMMANDS. EIN COMMAND = EINE AKTION.**
+Die Bridge MCP funktioniert DOCH. Der lokale Server auf Port 7777 + die
+Extension v5.0.0 in Chrome = funktionierende Architektur.
 
-### Die EINZIGE Methode die funktioniert:
-
-```
-1. Chrome mit ECHTEM Default-Profil öffnen (manuell)
-2. Bei HeyPiggy einloggen (manuell, Session-Cache hält 72h)
-3. JEDEN Schritt als EINZELNEN Shell-Command ausführen:
-   a. screencapture → Screenshot
-   b. Puter AI Free → Bildanalyse (kostenlos, GPT-5.4-nano Vision)
-   c. cliclick → Klick an Koordinaten
-   d. repeat
-4. Jeden erfolgreichen Command als .md in successfull/ speichern
-```
-
-### Warum nur Shell-Commands:
+4 fehlende Dateien wurden erstellt (ws.js, external.js, native.js, behavior.js).
+Keep-Alive-Ping läuft alle 60 Sekunden.
 
 ```
-❌ Python-Skripte (worker, agent, orchestrator) → ALLE kaputt
-❌ Bridge MCP → KAPUTT
-❌ playwright_stealth_worker.py → KAPUTT (show "automatisierte Testsoftware")
-❌ playwright_profile_clone → KAPUTT (erkannt als Bot)
-❌ CDP/Playwright-Launch → KAPUTT (webdriver=true)
+Chrome Extension (v5.0.0) ──WebSocket──→ Bridge Server (Port 7777) ──HTTP──→ Worker
 ```
 
 ### Was FUNKTIONIERT:
 
 ```
-✅ Echtes Chrome mit Default-Profil (manuell geöffnet)
-✅ screencapture -x → Screenshot
-✅ Puter AI Free (puter.ai.chat mit gpt-5.4-nano) → kostenlose Bildanalyse
-✅ cliclick c:X,Y → Mausklick an Koordinaten
-✅ osascript → Chrome-Fenster steuern (activate, bounds)
-✅ KEIN VPN! ProtonVPN blockiert HeyPiggy Surveys
+✅ Bridge Server lokal: PORT=7777 node server.js
+✅ Extension in Chrome: chrome://extensions/ → OpenSIN Bridge v5.0.0
+✅ curl http://localhost:7777/mcp → navigate, click, type, screenshot, execute_script
+✅ Echtes Chrome Default-Profil → Umfragen SICHTBAR
+✅ KEIN VPN! ProtonVPN blockiert Surveys
+✅ 91 Tools verfügbar über Bridge
 ```
 
-### Shell-Command-Toolkit:
+### Was NIEMALS funktioniert:
 
-```bash
-# Screenshot
-screencapture -x /tmp/step.png
-
-# Puter AI Free Vision (Node.js one-liner)
-cd /tmp && node -e "const p=require('@heyputer/puter.js');(async()=>{const a=await p.ai.chat('Was siehst du?','file:///tmp/step.png',{model:'gpt-5.4-nano'});console.log(a)})()"
-
-# Klick
-cliclick c:X,Y
-
-# Chrome steuern
-osascript -e 'tell application "Google Chrome" to activate'
-osascript -e 'tell application "Google Chrome" to set bounds of front window to {0,0,1024,768}'
-
-# Warten
-sleep 3
 ```
-
-### successfull/ Verzeichnis:
-
-Jeder erfolgreiche Command wird als einzelne .md Datei dokumentiert:
-```
-successfull/
-  01-screenshot.md    → Screenshot-Befehl
-  02-vision.md        → Puter AI Vision-Befehl
-  03-click-survey.md  → Klick auf Survey
-  04-verify.md        → Verifikation nach Klick
-  ...
+❌ playwright_stealth_worker.py → KAPUTT ("automatisierte Testsoftware")
+❌ playwright_profile_clone → KAPUTT (erkannt als Bot)
+❌ Headless Chrome → KAPUTT (sofort erkannt)
+❌ CDP direkt → KAPUTT (webdriver=true)
+❌ ProtonVPN → BLOCKIERT alle Surveys
 ```
 MacDesktopController (desktop_control.py)
     ├── screencapture (Screenshots per macOS API)
