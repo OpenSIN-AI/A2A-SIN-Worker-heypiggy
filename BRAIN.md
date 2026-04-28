@@ -202,12 +202,50 @@ Cashout-Defense + Pre-Flight-Analyse + Persona-Engine in EINEM Tool.
 
 ---
 
-## 10. DO-NOT-TOUCH Liste
+## 10. NVIDIA Vision API — SCHNELL (<1s) mit 512px Bildern
 
-- **NIE** `playwright_stealth_worker.py` für Live-Runs verwenden (direktes Chrome!)
-- **NIE** `components/ui/*` — shadcn-Primitives (React-Legacy, ungenutzt)
-- **NIE** `user_read_only_context/` — Agent-Scratchpad, read-only
-- **NIE** Cashout/Header-Selektoren ohne die 3-Layer-Defense
+**🚀 NICHT das Modell ist langsam — das BILD ist zu groß!**
+
+| Bildgröße | Base64 | Antwortzeit |
+|-----------|--------|-------------|
+| 1920px Fullscreen | ~500KB | ❌ 45s+ Timeout |
+| **512px Komprimiert** | **~184KB** | ✅ **<1 Sekunde** |
+
+**Working Command:**
+```bash
+screencapture -x /tmp/step.png && sips -Z 512 /tmp/step.png --out /tmp/step_s.png && IMG=$(base64 -i /tmp/step_s.png) && curl -s --max-time 30 https://integrate.api.nvidia.com/v1/chat/completions \
+  -H "Authorization: Bearer $NVIDIA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"meta/llama-3.2-11b-vision-instruct\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Find survey button. ONLY: X=NUM Y=NUM\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,$IMG\"}}]}],\"max_tokens\":25}"
+```
+
+**Verfügbare FREE Vision-Modelle (28.4.2026):**
+- ✅ `meta/llama-3.2-11b-vision-instruct` — ~1s, empfohlen
+- ✅ `meta/llama-3.2-90b-vision-instruct` — langsamer (größer)
+- ❌ Alle Phi/Mistral-Vision — EOL 15.4.2026
+
+**Puter.js:** 100% kostenlos (User-Pays). REST-API blockiert. Node.js-SDK hat WebSocket-Bug. Nur Browser.
+
+
+## 11. Komplettes Tool-Stack (funktionierend)
+
+| Schritt | Tool | Befehl |
+|---------|------|--------|
+| Screenshot | macOS screencapture | `screencapture -x /tmp/step.png` |
+| Verkleinern | macOS sips | `sips -Z 512 /tmp/step.png --out /tmp/step_s.png` |
+| Vision | NVIDIA curl | `<1s mit 512px` |
+| Klick | Bridge MCP curl | `curl POST /mcp → click_element` |
+| Navigieren | Bridge MCP curl | `curl POST /mcp → navigate` |
+| Text | Bridge MCP curl | `curl POST /mcp → type_text` |
+
+
+## 12. DO-NOT-TOUCH Liste
+
+- **NIE** `playwright_stealth_worker.py` (hat ALLOW_AUTOMATION_CHROME-Guard)
+- **NIE** VPN anlassen! ProtonVPN blockiert HeyPiggy Surveys
+- **NIE** 1920px Bilder an NVIDIA schicken (45s Timeout!)
+- **NIE** Cashout/Header-Selektoren ohne 3-Layer-Defense
+- **IMMER** 512px vor Vision-Call (`sips -Z 512`)
 
 ---
 
