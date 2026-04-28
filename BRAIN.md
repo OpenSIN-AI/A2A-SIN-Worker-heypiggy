@@ -263,6 +263,12 @@ screen_Y = 23 + crop_Y   # Chrome top bei 23
 
 **Kombiniere Click + Keyboard:** Wenn Klick nicht trifft → Tab/Enter als Fallback
 
+**⚠️ VOR jedem Klick: Auf scrollbare Inhalte prüfen!**
+→ HeyPiggy-Umfragen haben oft MEHR Optionen als sichtbar (Scrollbalken)
+→ Vor Antwort-Klick: `scroll "down:500"` → Screenshot → prüfen ob neue Optionen
+→ Erst wenn ALLE Optionen erfasst → intelligenteste Antwort wählen
+→ unmask-cli DOM-Scan + Vision kombinieren für vollständiges Bild
+
 **Puter.js:** 100% kostenlos (User-Pays). REST-API blockiert. Node.js-SDK hat WebSocket-Bug. Nur Browser.
 
 
