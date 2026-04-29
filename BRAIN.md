@@ -431,12 +431,14 @@ coords = json.loads(response.choices[0].message.content)
 
 **🏆 Llama 4 Scout (Cloudflare Workers AI) ist UNSER Primär-Vision-Modell:**
 - ✅ Real-Screenshot Vision — präzise Beschreibungen
-- ✅ **Natives JSON-Output:** `{\"x\":176,\"y\":445}` — KEIN Parsing nötig!
+- ✅ **Natives JSON-Output:** `{"x":192,"y":144}` — KEIN Parsing nötig!
 - ✅ 17B MoE (16 Experts) — schneller als Mistral 675B
 - ✅ 100% KOSTENLOS (Workers AI Free Tier)
 - ✅ Kein Safety-Filter
 - ⚡ ~2-4s (17B vs 675B)
-- API: `https://api.cloudflare.com/client/v4/accounts/{ID}/ai/run/@cf/meta/llama-4-scout-17b-16e-instruct`
+- API: `https://api.cloudflare.com/client/v4/accounts/4621434bea0a1efc1ceff2a3f670e0c9/ai/run/@cf/meta/llama-4-scout-17b-16e-instruct`
+- Auth: `Bearer cfut_...` (Workers AI Token)
+- Confirm: Koordinaten getestet mit echtem Screenshot (29.4.2026)
 | 🖐️ Hände (Execute) | **computer-use-mcp** | SIN-CLIs | FREE |
 | 🔍 Röntgen (Analyze) | **unmask-cli** | SIN-CLIs | FREE |
 | 🥷 Tarnung (Stealth) | **playstealth-cli** | SIN-CLIs | FREE |
@@ -458,8 +460,27 @@ coords = json.loads(response.choices[0].message.content)
 - ❌ Puter SDK (Node.js) — WebSocket-Bug
 - ❌ Puter OpenAI-API — leere Vision-Antworten
 
-**Fazit Vision (29.4.2026):** Mistral Large 3 (675B) = BESTES kostenloses Vision-Modell.
+**Fazit Vision (29.4.2026):** Llama 4 Scout (Cloudflare) = BESTES kostenloses Vision-Modell. Natives JSON, kein Parsing, 17B = schnell.
+
+
+## 15. Cloudflare Workers AI — API Config
+
+```bash
+export CF_TOKEN="cfut_..."  # Cloudflare Workers AI Token
+export CF_ACCT="4621434bea0a1efc1ceff2a3f670e0c9"
+```
+
+## 16. SURVEY-LOOP (funktionierender Flow)
+
+```python
+# 1. Screenshot (screencapture oder MCP)
+# 2. Chrome-Crop (0,23,1024,791) ohne Resize
+# 3. Cloudflare Llama 4 Scout → {"x":N,"y":N}
+# 4. MCP left_click → an Koordinaten
+# 5. Scroll-Check: scroll + screenshot → prüfen ob mehr Optionen
+# 6. Wiederholen bis Survey Complete
+```
 
 ---
 
-*Letzte Aktualisierung: 28. April 2026 — CEO Deep-Dive Session*
+*Letzte Aktualisierung: 29. April 2026 — Vision-Modelle finalisiert*
