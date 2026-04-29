@@ -11,11 +11,21 @@
 **JEDER MCP-Befehl (click, scroll, key, type) greift in DAS AKTIVE CHROME EIN.**
 Wenn der User gerade arbeitet, zerstörst du seine Session.
 
-**KORREKT:**
-1. SEPARATES Chrome-Profil für Automation (`--user-data-dir=/tmp/heypiggy-bot`)
-2. SEPARATES Chrome-Fenster öffnen (nicht das User-Fenster)
-3. NUR im Bot-Fenster arbeiten
-4. Vor jedem Run: `chrome://version` prüfen ob Profil-Pfad korrekt ist
+**KORREKT — SEPARATES CHROME PROFIL:**
+```bash
+# 1. EINMALIG: Profil klonen (kopiert Session → kein Login nötig)
+cp -r ~/Library/Application\ Support/Google/Chrome/Default /tmp/heypiggy-bot
+
+# 2. Bot-Chrome starten (SEPARATES Fenster, EIGENES Profil)
+open -na "Google Chrome" --args --user-data-dir=/tmp/heypiggy-bot \
+  --new-window "https://www.heypiggy.com/?page=dashboard"
+
+# 3. Bot-Fenster auf rechte Bildhälfte
+osascript -e 'tell app "Google Chrome" to set bounds of front window to {960, 23, 1920, 1080}'
+
+# 4. MCP arbeitet NUR im Bot-Fenster
+python3 mcp_survey_runner.py
+```
 
 **NIEMALS:**
 - ❌ MCP `left_click` ohne vorher zu prüfen WELCHES Fenster aktiv ist
