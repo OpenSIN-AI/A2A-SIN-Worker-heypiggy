@@ -6,7 +6,22 @@
 
 ---
 
-## 1. Architektur-Regel #1: computer-use-mcp STATT Bridge
+# 🚨 REGEL #0: NIEMALS USER-CHROME ANFASSEN! 🚨
+
+**JEDER MCP-Befehl (click, scroll, key, type) greift in DAS AKTIVE CHROME EIN.**
+Wenn der User gerade arbeitet, zerstörst du seine Session.
+
+**KORREKT:**
+1. SEPARATES Chrome-Profil für Automation (`--user-data-dir=/tmp/heypiggy-bot`)
+2. SEPARATES Chrome-Fenster öffnen (nicht das User-Fenster)
+3. NUR im Bot-Fenster arbeiten
+4. Vor jedem Run: `chrome://version` prüfen ob Profil-Pfad korrekt ist
+
+**NIEMALS:**
+- ❌ MCP `left_click` ohne vorher zu prüfen WELCHES Fenster aktiv ist
+- ❌ MCP `scroll` wenn User im selben Chrome arbeitet
+- ❌ MCP `key` (cmd+l, enter) — das navigiert User-Tabs weg
+- ❌ Irgendwas ohne explizit Bot-Chrome zu fokussieren
 
 **🔥 BRIDGE IST TOT — LANG LEBE computer-use-mcp! (28.4.2026, 22:30)**
 
@@ -264,9 +279,26 @@ screen_Y = 23 + crop_Y   # Chrome top bei 23 (Menüleiste)
 **⚠️ 90B Koordinaten-Format ist INKONSISTENT:**
 - Manchmal Pixel ("512, 384")
 - Manchmal Prozent ("0.09, 0.25")
-- Immer "pixel" im Prompt erwähnen: "Give PIXEL coordinates on this 1024x768 image"
+- Manchmal Text ("the button is in the upper left...")
 
-**Kombiniere Click + Keyboard:** Wenn Klick nicht trifft → `left_click` MIT `coordinate`-Parameter (nicht separate mouse_move+click).
+**LÖSUNG: JSON-Output-Enforcement im Prompt:**
+```
+Return ONLY a JSON object: {"x": number, "y": number}.
+This is a 1024x768 PIXEL image.
+Find the center of the first survey button.
+```
+**NIE:** "Give coordinates" oder "X,Y" — das lässt Format offen.
+**IMMER:** JSON mit `"x"` und `"y"` Keys — Modell wird gezwungen, Zahlen zu liefern.
+
+**Parse-Code:**
+```python
+import json, re
+# Extrahiere erstes JSON-Objekt aus 90B-Antwort
+match = re.search(r'\{[^}]+\}', response)
+if match:
+    coords = json.loads(match.group())
+    x, y = int(coords['x']), int(coords['y'])
+```
 
 **⚠️ VOR jedem Klick: Auf scrollbare Inhalte prüfen!**
 → HeyPiggy-Umfragen haben oft MEHR Optionen als sichtbar (Scrollbalken)
