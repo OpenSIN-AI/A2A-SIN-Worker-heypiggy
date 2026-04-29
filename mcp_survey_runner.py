@@ -108,13 +108,22 @@ class SurveyRunner:
             try: return json.loads(data.decode())
             except: continue
 
-    async def screenshot_png(self) -> bytes:
-        """Screenshot via MCP → PNG bytes."""
+    async def screenshot_png(self) -> tuple[bytes, int, int]:
+        """Screenshot via MCP → PNG bytes + dimensions."""
         resp = await self.mcp('get_screenshot')
+        img_bytes = None
+        w, h = 0, 0
         for item in resp.get('result',{}).get('content',[]):
             if item['type'] == 'image':
-                return base64.b64decode(item['data'])
-        return b''
+                img_bytes = base64.b64decode(item['data'])
+            if item['type'] == 'text':
+                import json
+                try:
+                    dims = json.loads(item['text'])
+                    w = dims.get('image_width', 0)
+                    h = dims.get('image_height', 0)
+                except: pass
+        return img_bytes or b'', w, h
 
     async def click(self, x: int, y: int):
         """Klick an Bildschirm-Koordinaten."""
@@ -134,25 +143,25 @@ class SurveyRunner:
         await self.mcp('key', text='enter')
         await asyncio.sleep(4)
 
-    async def get_screenshot_with_grid(self) -> Image.Image:
-        """Full-Screen Screenshot MIT Grid-Overlay. Kein Crop — universell."""
-        png = await self.screenshot_png()
+    async def get_screenshot_with_grid(self) -> tuple[Image.Image, int, int]:
+        """Full-Screen Screenshot MIT Grid-Overlay. Returns (image, width, height)."""
+        png, w, h = await self.screenshot_png()
         img = Image.open(BytesIO(png)).convert('RGBA')
-        return draw_grid(img)
+        return draw_grid(img), w, h
 
-    def ask_vision(self, image: Image.Image, prompt: str, model: str = "cf") -> tuple[int,int] | None:
-        """Vision-Modell befragen → Koordinaten parsen."""
-        grid_img = draw_grid(image.copy())
+    def ask_vision(self, image: Image.Image, prompt: str, img_w: int = 0, img_h: int = 0) -> tuple[int,int] | None:
+        """Vision-Modell befragen → Koordinaten parsen (mit echten Bild-Dimensionen)."""
+        grid_img = image  # Grid already drawn by get_screenshot_with_grid
         buf = BytesIO(); grid_img.convert('RGB').save(buf, 'JPEG', quality=50)
         img_b64 = base64.b64encode(buf.getvalue()).decode()
 
-        if model == "cf":
-            return self._ask_cloudflare(img_b64, prompt)
-        else:
-            return self._ask_nvidia(img_b64, prompt)
+        result = self._ask_cloudflare(img_b64, prompt, img_w, img_h)
+        if result is None:
+            result = self._ask_nvidia(img_b64, prompt, img_w, img_h)
+        return result
 
-    def _ask_cloudflare(self, img_b64: str, prompt: str) -> tuple[int,int] | None:
-        """Llama 4 Scout via Cloudflare."""
+    def _ask_cloudflare(self, img_b64: str, prompt: str, img_w: int = 0, img_h: int = 0) -> tuple[int,int] | None:
+        """Llama 4 Scout via Cloudflare — nutzt echte Bild-Dimensionen."""
         data = json.dumps({'messages':[{'role':'user','content':[
             {'type':'text','text':f'Grid image. Read nearest red coordinate numbers to the target. {prompt} Answer: X= Y='},
             {'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{img_b64}'}}
@@ -162,25 +171,19 @@ class SurveyRunner:
         try:
             r = json.loads(urllib.request.urlopen(req, timeout=35).read())
             text = r['result']['response']
-            # Parse X=... Y=... — handles BOTH "X=400 Y=300" AND "X=0.80 Y=0.11"
-            import re
             xm = re.search(r'X\s*=\s*([\d.]+)', text, re.IGNORECASE)
             ym = re.search(r'Y\s*=\s*([\d.]+)', text, re.IGNORECASE)
             if xm and ym:
-                x_val = float(xm.group(1))
-                y_val = float(ym.group(1))
-                # If < 10, it's normalized (percentage) → convert to pixels
-                if x_val < 10 and x_val > 0:
-                    x_val = int(x_val * 1024)  # 1024 = Chrome width
-                if y_val < 10 and y_val > 0:
-                    y_val = int(y_val * 768)   # 768 = Chrome height
+                x_val = float(xm.group(1)); y_val = float(ym.group(1))
+                if x_val < 10 and x_val > 0: x_val *= (img_w or 1464)
+                if y_val < 10 and y_val > 0: y_val *= (img_h or 823)
                 return int(x_val), int(y_val)
         except Exception as e:
             print(f"  ⚠️ Cloudflare: {e}")
         return None
 
-    def _ask_nvidia(self, img_b64: str, prompt: str) -> tuple[int,int] | None:
-        """Mistral/90B via NVIDIA (Backup)."""
+    def _ask_nvidia(self, img_b64: str, prompt: str, img_w: int = 0, img_h: int = 0) -> tuple[int,int] | None:
+        """Mistral/90B via NVIDIA (Backup) — nutzt echte Bild-Dimensionen."""
         data = json.dumps({
             'model':'mistralai/mistral-large-3-675b-instruct-2512',
             'messages':[{'role':'user','content':[{'type':'text','text':f'Grid image. {prompt} Return JSON: {{"x":N,"y":N}}'},
@@ -200,9 +203,9 @@ class SurveyRunner:
             print(f"  ⚠️ NVIDIA: {e}")
         return None
 
-    async def find_and_click(self, image: Image.Image, prompt: str) -> bool:
+    async def find_and_click(self, image: Image.Image, img_w: int, img_h: int, prompt: str) -> bool:
         """Vision → absolute Koordinaten → Klick."""
-        coords = self.ask_vision(image, prompt)
+        coords = self.ask_vision(image, prompt, img_w, img_h)
         if coords:
             x, y = coords
             print(f"  🎯 {x},{y} → Klick")
@@ -215,8 +218,8 @@ class SurveyRunner:
         """Scrollen + prüfen ob mehr Optionen sichtbar."""
         await self.scroll(amount="down:500")
         await asyncio.sleep(1)
-        img = await self.get_screenshot_with_grid()
-        coords = self.ask_vision(img, "Are there NEW options visible below that were hidden before?")
+        img, w, h = await self.get_screenshot_with_grid()
+        coords = self.ask_vision(img, "Are there NEW options visible below that were hidden before?", w, h)
         # Wenn Koordinaten tiefer als vorher → es gibt mehr Optionen
         return coords is not None
 
@@ -232,10 +235,10 @@ class SurveyRunner:
             print("✅ Dashboard geladen")
 
             # Find and click first survey
-            img = await self.get_screenshot_with_grid()
-            print(f"📸 Screenshot: {img.size}")
+            img, w, h = await self.get_screenshot_with_grid()
+            print(f"📸 Screenshot: {img.size} ({w}×{h})")
 
-            found = await self.find_and_click(img, "Find first survey card with EUR amount. Center coords.")
+            found = await self.find_and_click(img, w, h, "Find first survey card with EUR amount. Center coords.")
             if not found:
                 print("❌ Kein Survey gefunden")
                 return
@@ -251,19 +254,19 @@ class SurveyRunner:
                     await self.scroll(amount="down:400")
                     await asyncio.sleep(1)
 
-                img = await self.get_screenshot_with_grid()
+                img, w, h = await self.get_screenshot_with_grid()
                 print(f"❓ Frage {question+1}")
 
                 # Finde Antwort-Option
-                answered = await self.find_and_click(img, "Find the safest/neutral answer option. Its center coords.")
+                answered = await self.find_and_click(img, w, h, "Find the safest/neutral answer option. Its center coords.")
                 if not answered:
                     print("  ⚠️ Keine Antwort gefunden, versuche Next direkt")
 
                 await asyncio.sleep(0.5)
 
                 # Finde Next-Button
-                img = await self.get_screenshot_with_grid()
-                next_found = await self.find_and_click(img, "Find Next/Weiter button center coords.")
+                img2, w2, h2 = await self.get_screenshot_with_grid()
+                next_found = await self.find_and_click(img2, w2, h2, "Find Next/Weiter button center coords.")
                 if not next_found:
                     print("  🏁 Survey vermutlich beendet")
                     self.stats["surveys"] += 1
