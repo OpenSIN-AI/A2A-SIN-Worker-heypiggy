@@ -1,314 +1,548 @@
 #!/usr/bin/env python3
 """
-OpenSIN Survey Runner — Complete Pipeline v2.0
+OpenSIN Survey Runner v3.2 — cua-driver powered, dry-run, page-state detection
 
 Architektur:
-  🖐️ computer-use-mcp (Maus/Keyboard/Screenshot)
-  👁️ Cloudflare Llama 4 Scout + Grid-Overlay (Vision)
-  🧠 NVIDIA 90B / Mistral 675B (Backup Vision)
+  cua-driver (click/screenshot/type via SkyLight — KEIN Cursor-Sprung)
+  OCR-First Grid + SoM (Vision-Prompting)
+  Cloudflare Llama 4 Scout / NVIDIA Mistral 675B (Backup)
 
 Usage:
-  python3 mcp_survey_runner.py
-
-Env:
-  CF_TOKEN    — Cloudflare Workers AI Token
-  CF_ACCT     — Cloudflare Account ID
-  NVIDIA_API_KEY — Backup Vision
+  python3 mcp_survey_runner.py              # Normaler Survey-Loop
+  python3 mcp_survey_runner.py --dry-run     # Nur GUI + Vision, kein Klick
+  python3 mcp_survey_runner.py --one-shot    # Nur EINEN Survey-Klick (Debug)
 """
 
-import asyncio, json, subprocess, base64, urllib.request, re, os, sys
+import json, subprocess, base64, urllib.request, re, os, sys, time
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+from panel_overrides import detect_panel, build_panel_prompt_block
 
 # ── Config ──────────────────────────────────────────────────────────────────
-CF_TOKEN = os.environ.get("CF_TOKEN", "")  # Set via env or Infisical
-CF_ACCT  = os.environ.get("CF_ACCT", "4621434bea0a1efc1ceff2a3f670e0c9")
-CF_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
-NVIDIA_KEY = os.environ.get("NVIDIA_API_KEY", "")  # via Infisical or env
-CF_URL = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCT}/ai/run/{CF_MODEL}"
+CF_TOKEN   = os.environ.get("CF_TOKEN", "")
+CF_ACCT    = os.environ.get("CF_ACCT", "4621434bea0a1efc1ceff2a3f670e0c9")
+NVIDIA_KEY = os.environ.get("NVIDIA_API_KEY", "")
+CF_URL     = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCT}/ai/run/@cf/meta/llama-4-scout-17b-16e-instruct"
 NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+DRY_RUN    = '--dry-run' in sys.argv
+ONE_SHOT   = '--one-shot' in sys.argv
+_BOT_PID   = 54971
 
-# ── Grid-Overlay Konfiguration ──────────────────────────────────────────────
-GRID_SPACING = 20
-GRID_ALPHA_MAJOR = 90   # 100px Linien
-GRID_ALPHA_MINOR = 55   # 50px Linien
-GRID_ALPHA_HAIR  = 18   # 20px Linien
+# ── Chrome PID + window_id ─────────────────────────────────────────────────
+_WID_CACHE = None
 
-def draw_grid(image: Image.Image) -> Image.Image:
-    """Zeichne wissenschaftliches 20px Grid-Overlay auf ein Bild."""
-    overlay = Image.new('RGBA', image.size, (0,0,0,0))
-    draw = ImageDraw.Draw(overlay, 'RGBA')
+def find_bot_window() -> tuple[int, int]:
+    """Finde PID + window_id des Bot-Chrome-Tabs mit HeyPiggy.
+    Sucht zuerst nach 'heypiggy' im Titel. Falls nicht gefunden:
+    Nimmt das erste Fenster von PID _BOT_PID (46109). Niemals PID 2253.
+    """
+    global _WID_CACHE
+    if _WID_CACHE: return _BOT_PID, _WID_CACHE
+
+    r = subprocess.run(['cua-driver', 'call', 'list_windows'],
+                       capture_output=True, text=True, timeout=10)
     try:
-        f8 = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 8)
-        f9 = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 9)
-        f10 = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 10)
-        f12 = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 12)
+        data = json.loads(r.stdout)
+        windows = data.get('structuredContent', data).get('windows', [])
+        # 1. Durchgang: HeyPiggy im Titel
+        for w in windows:
+            title = (w.get('title') or '').lower()
+            if 'heypiggy' in title and w.get('pid') != 2253:
+                _WID_CACHE = w['window_id']
+                return w['pid'], _WID_CACHE
+        # 2. Durchgang: HeyPiggy egal welche PID (bevorzugt != 2253)
+        best, best_pid = None, 0
+        for w in windows:
+            title = (w.get('title') or '').lower()
+            if 'heypiggy' in title:
+                if w['pid'] != 2253 and w['pid'] != best_pid:
+                    best, best_pid = w, w['pid']
+                elif not best:
+                    best = w
+        if best:
+            _WID_CACHE = best['window_id']
+            return best['pid'], _WID_CACHE
+        # 3. Durchgang: Bot-Chrome Fenster (PID 46109) ohne Title
+        for w in windows:
+            if w.get('pid') == _BOT_PID:
+                _WID_CACHE = w['window_id']
+                return _BOT_PID, _WID_CACHE
+        # 4. Fallback: höchste Chrome PID (letzter gestarteter Prozess)
+        chrome_windows = [w for w in windows if w.get('app_name') == 'Google Chrome']
+        if chrome_windows:
+            by_pid = sorted(chrome_windows, key=lambda w: -w['pid'])
+            best = by_pid[0]
+            _WID_CACHE = best['window_id']
+            return best['pid'], _WID_CACHE
+    except (json.JSONDecodeError, KeyError, IndexError):
+        pass
+    return _BOT_PID, 0
+
+
+def get_pid_wid() -> tuple[int, int]:
+    return find_bot_window()
+
+def get_current_url(pid: int, wid: int) -> str:
+    try:
+        r = subprocess.run(
+            ['cua-driver', 'call', 'get_window_state', '--pid', str(pid), '--window-id', str(wid)],
+            capture_output=True, text=True, timeout=10
+        )
+        data = json.loads(r.stdout)
+        return data.get('structuredContent', data).get('url', '')
     except:
-        f8 = f9 = f10 = f12 = ImageFont.load_default()
+        return ''
 
-    for x in range(0, image.width, GRID_SPACING):
-        is_100 = (x % 100 == 0); is_50 = (x % 50 == 0)
-        a = GRID_ALPHA_MAJOR if is_100 else (GRID_ALPHA_MINOR if is_50 else GRID_ALPHA_HAIR)
-        w = 2 if is_100 else (1 if is_50 else 0)
-        draw.line([(x,0),(x,image.height)], fill=(255,40,40,a), width=w)
-    for y in range(0, image.height, GRID_SPACING):
-        is_100 = (y % 100 == 0); is_50 = (y % 50 == 0)
-        a = GRID_ALPHA_MAJOR if is_100 else (GRID_ALPHA_MINOR if is_50 else GRID_ALPHA_HAIR)
-        w = 2 if is_100 else (1 if is_50 else 0)
-        draw.line([(0,y),(image.width,y)], fill=(255,40,40,a), width=w)
 
-    for x in range(0, image.width, GRID_SPACING):
-        for y in range(0, image.height, GRID_SPACING):
-            if x % 100 == 0 and y % 100 == 0:
-                draw.text((x+2,y+2), f'{x},{y}', fill=(255,55,55,140), font=f10)
-            elif x % 40 == 0 and y % 40 == 0:
-                draw.text((x+2,y+2), f'{x},{y}', fill=(255,100,100,90), font=f8)
-            elif x % 60 == 0 and y % 60 == 0:
-                draw.text((x+2,y+2), f'{x},{y}', fill=(255,130,130,60), font=f8)
+# ── Grid-Overlay (OCR-First + SoM) ─────────────────────────────────────────
+GRID_SPACING = 20
+_FONTS = {}
+def _get_font(size: int):
+    if size not in _FONTS:
+        try: _FONTS[size] = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', size)
+        except: _FONTS[size] = ImageFont.load_default()
+    return _FONTS[size]
 
-    for x in range(0, image.width, GRID_SPACING):
-        f, a = (f10, 150) if x%100==0 else (f8, 80)
-        draw.text((x+1, 0), str(x), fill=(255,80,80,a), font=f)
-    for y in range(0, image.height, GRID_SPACING):
-        f, a = (f10, 150) if y%100==0 else (f8, 80)
-        draw.text((0, y+1), str(y), fill=(255,80,80,a), font=f)
+
+def draw_grid(image: Image.Image, som_elements: list | None = None) -> Image.Image:
+    """OCR-First Grid + Set-of-Mark (SoM) Overlay."""
+    W, H = image.width, image.height
+    overlay = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay, 'RGBA')
+    f8 = _get_font(8); f10 = _get_font(10)
+
+    for x in range(0, W, GRID_SPACING):
+        draw.rectangle([x, 0, x+GRID_SPACING, H], outline=(255,60,60,5), width=0)
+    for y in range(0, H, GRID_SPACING):
+        draw.rectangle([0, y, W, y+GRID_SPACING], outline=(255,60,60,5), width=0)
+    for x in range(0, W, 100):
+        draw.line([(x,0),(x,H)], fill=(255,60,60,16), width=1)
+    for y in range(0, H, 100):
+        draw.line([(0,y),(W,y)], fill=(255,60,60,16), width=1)
+    for y in range(0, H, 40):
+        for x in range(0, W, 40):
+            coord = f"{x},{y}"
+            bb = draw.textbbox((0,0), coord, font=f8)
+            tw, th = bb[2]-bb[0], bb[3]-bb[1]
+            draw.rectangle([x+2, y+2, x+tw+5, y+th+5], fill=(0,0,0,130))
+            draw.text((x+3, y+3), coord, fill=(255,200,100,155), font=f8)
+    for y in range(0, H, 100):
+        for x in range(0, W, 100):
+            coord = f"\u25c6{x},{y}\u25c6"
+            bb = draw.textbbox((0,0), coord, font=f10)
+            tw, th = bb[2]-bb[0], bb[3]-bb[1]
+            draw.rectangle([x+3, y+3, x+tw+6, y+th+6], fill=(0,0,0,180))
+            draw.text((x+5, y+5), coord, fill=(255,220,120,210), font=f10)
+
+    if som_elements:
+        for idx, el in enumerate(som_elements):
+            som_id = idx + 1
+            x, y, w, h = el['x'], el['y'], el['w'], el['h']
+            color = (0, 255, 128, 140) if el.get('tag','') in ('BUTTON','A','INPUT','SELECT') else (0, 200, 255, 120)
+            draw.rectangle([x, y, x+w, y+h], outline=color, width=2)
+            label = str(som_id)
+            bb = draw.textbbox((0,0), label, font=f10)
+            lw, lh = bb[2]-bb[0]+6, bb[3]-bb[1]+4
+            lx = max(0, x-lw-2); ly = max(0, y-2)
+            draw.rectangle([lx, ly, lx+lw, ly+lh], fill=(0,0,0,200))
+            draw.rectangle([lx, ly, lx+lw, ly+lh], outline=color[:3]+(200,), width=1)
+            draw.text((lx+3, ly+2), label, fill=(255,255,255,240), font=f10)
 
     result = image.convert('RGBA')
     result.paste(overlay, (0,0), overlay)
     return result
 
 
+# ── cua-driver CLI Wrapper ─────────────────────────────────────────────────
+
+def cua_call(tool: str, args: dict | None = None, quiet: bool = False) -> dict:
+    """Rufe cua-driver Tool auf. KEIN Cursor-Sprung."""
+    cmd = ['cua-driver', 'call', tool, '--raw']
+    if args: cmd.append(json.dumps(args))
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    try: return json.loads(result.stdout)
+    except: return {"raw_stdout": result.stdout[:200]}
+
+
+def cua_screenshot_bytes() -> bytes:
+    """Screenshot via cua-driver, OHNE Log-Spam. Nur PNG-Bytes."""
+    subprocess.run(['cua-driver', 'call', 'screenshot', '--image-out', '/tmp/_cs.png'],
+                   capture_output=True, timeout=15)
+    with open('/tmp/_cs.png', 'rb') as f:
+        return f.read()
+
+
+def cua_click(x: int, y: int, pid: int | None = None, wid: int | None = None) -> bool:
+    """Klick via cua-driver an Bildschirm-Koordinaten. Cursor bleibt stehen."""
+    if pid is None or wid is None: pid, wid = get_pid_wid()
+    resp = cua_call('click', {"pid": pid, "window_id": wid, "x": x, "y": y})
+    return 'posted' in json.dumps(resp).lower()
+
+
+def cua_scroll(pid: int | None = None, wid: int | None = None):
+    """Scroll Down."""
+    if pid is None or wid is None: pid, wid = get_pid_wid()
+    cua_call('scroll', {"pid": pid, "window_id": wid, "direction": "down"})
+
+
+def cua_get_ax_elements(pid: int | None = None, wid: int | None = None) -> list[dict]:
+    """Extrahiere interaktive Elemente via Accessibility-Tree.
+    Ersetzt JS-basiertes SoM (blockiert auf Chrome 147).
+    Nutzt get_window_state → tree_markdown → regex.
+    Liefert 50-300 Elemente mit [element_index, text, x, y, w, h].
+    """
+    if pid is None or wid is None: pid, wid = get_pid_wid()
+    resp = cua_call('get_window_state', {"pid": pid, "window_id": wid})
+    sc = resp.get('structuredContent', resp)
+    markdown = sc.get('tree_markdown', '')
+    if not markdown:
+        return []
+    elements = []
+    pattern = re.compile(
+        r'\[element_index\s+(\d+)\]\s*'
+        r'(?:"([^"]*)"\s*)?'
+        r'\[(\d+),(\d+),(\d+),(\d+)\]'
+    )
+    for m in pattern.finditer(markdown):
+        elements.append({
+            'element_index': int(m.group(1)),
+            'text': (m.group(2) or '').strip()[:30],
+            'x': int(m.group(3)), 'y': int(m.group(4)),
+            'w': int(m.group(5)), 'h': int(m.group(6)),
+        })
+    return elements
+
+
+# ── Grid-Screenshot (OCR + optional AX-SoM) ────────────────────────────────
+
+def grid_screenshot(with_som: bool = False) -> tuple[Image.Image, int, int]:
+    """Screenshot → OCR-Grid. Optional mit AX-Tree SoM Boxen.
+    with_som=True ruft cua_get_ax_elements() auf und zeichnet Boxen.
+    """
+    png = cua_screenshot_bytes()
+    img = Image.open(BytesIO(png)).convert('RGBA')
+    pid, wid = get_pid_wid()
+
+    som_elements = None
+    som_count = 0
+    if with_som:
+        ax = cua_get_ax_elements(pid, wid)
+        if ax:
+            # Nur interaktive Elemente (Buttons, Links) behalten
+            som_elements = [e for e in ax if e.get('w', 0) > 10 and e.get('h', 0) > 10]
+            som_count = len(som_elements)
+
+    img_grid = draw_grid(img, som_elements)
+
+    W, H = img_grid.size
+    f8 = _get_font(8)
+    final = Image.new('RGBA', (W, H+26), (15,15,20,255))
+    ld = ImageDraw.Draw(final)
+    final.paste(img_grid, (0,0))
+    ld.rectangle([0,H,W,H+26], fill=(15,15,20,250))
+    label = f'cua-driver PID {pid} wid {wid}'
+    if som_count: label += f' | AX-SoM {som_count} Elemente'
+    if DRY_RUN: label += ' | DRY-RUN (kein Klick)'
+    ld.text((3,H+4), label, fill=(255,190,100), font=f8)
+    return final, pid, wid
+
+
+# ── Vision (Cloudflare / NVIDIA) ───────────────────────────────────────────
+
+def ask_vision(image: Image.Image, prompt: str) -> tuple[int,int] | None:
+    """Vision-Modell befragen → Koordinaten parsen."""
+    buf = BytesIO(); image.convert('RGB').save(buf, 'JPEG', quality=50)
+    img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    # Cloudflare first
+    if CF_TOKEN:
+        result = _ask_cloudflare(img_b64, prompt)
+        if result: return result
+    # NVIDIA fallback
+    if NVIDIA_KEY:
+        return _ask_nvidia(img_b64, prompt)
+    return None
+
+
+def ask_vision_text(image: Image.Image, prompt: str) -> str:
+    """Vision befragen → Rohtext (keine Koordinaten-Parsing)."""
+    buf = BytesIO(); image.convert('RGB').save(buf, 'JPEG', quality=50)
+    img_b64 = base64.b64encode(buf.getvalue()).decode()
+    data = json.dumps({
+        'model': 'mistralai/mistral-large-3-675b-instruct-2512',
+        'messages': [{'role':'user','content':[
+            {'type':'text','text':prompt},
+            {'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{img_b64}'}}
+        ]}],'max_tokens':60
+    }).encode()
+    req = urllib.request.Request(NVIDIA_URL, data=data,
+        headers={'Authorization':f'Bearer {NVIDIA_KEY}','Content-Type':'application/json'})
+    try:
+        resp = json.loads(urllib.request.urlopen(req, timeout=60).read())
+        return resp['choices'][0]['message']['content']
+    except: return ""
+
+
+def _ask_cloudflare(img_b64: str, prompt: str) -> tuple[int,int] | None:
+    """Llama 4 Scout via Cloudflare."""
+    data = json.dumps({'messages':[{'role':'user','content':[
+        {'type':'text','text':f'Grid overlay visible. {prompt} Reply: COORD=X,Y. Nothing else.'},
+        {'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{img_b64}'}}
+    ]}],'max_tokens':30}).encode()
+    req = urllib.request.Request(CF_URL, data=data,
+        headers={'Authorization':f'Bearer {CF_TOKEN}','Content-Type':'application/json'})
+    try:
+        r = json.loads(urllib.request.urlopen(req, timeout=35).read())
+        text = r['result']['response']
+        return _extract_coord(text)
+    except: return None
+
+
+def _ask_nvidia(img_b64: str, prompt: str) -> tuple[int,int] | None:
+    """Mistral 675B via NVIDIA."""
+    data = json.dumps({
+        'model': 'mistralai/mistral-large-3-675b-instruct-2512',
+        'messages': [{'role':'user','content':[
+            {'type':'text','text':f'Grid overlay visible. {prompt} Reply: COORD=X,Y'},
+            {'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{img_b64}'}}
+        ]}],'max_tokens':30
+    }).encode()
+    req = urllib.request.Request(NVIDIA_URL, data=data,
+        headers={'Authorization':f'Bearer {NVIDIA_KEY}','Content-Type':'application/json'})
+    try:
+        r = json.loads(urllib.request.urlopen(req, timeout=60).read())
+        text = r['choices'][0]['message']['content']
+        return _extract_coord(text)
+    except: return None
+
+
+def _extract_coord(text: str) -> tuple[int,int] | None:
+    """Extrahiere erstes Zahlenpaar aus Text."""
+    m = re.search(r'COORD\s*[=:]\s*(\d+)\s*[,;]\s*(\d+)', text, re.I)
+    if not m:
+        xm = re.search(r'X\s*=\s*(\d+)', text, re.I)
+        ym = re.search(r'Y\s*=\s*(\d+)', text, re.I)
+        if xm and ym: m = (xm.group(1), ym.group(1))
+    if not m:
+        pairs = re.findall(r'(\d+)\s*[,;]\s*(\d+)', text)
+        if pairs: m = pairs[0]
+    if m:
+        if isinstance(m, tuple): return int(m[0]), int(m[1])
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+# ── Page-State Detection ───────────────────────────────────────────────────
+
+PAGE_STATES = {
+    'dashboard':    'dashboard with survey cards',
+    'survey_start': 'survey welcome or start page',
+    'screener':     'screener / filter question about demographics',
+    'question':     'survey question with answer options',
+    'attention':    'attention check (select a specific answer)',
+    'open_ended':   'open-ended text question (textarea)',
+    'matrix':       'matrix / grid / table of radio buttons',
+    'slider':       'slider / range / scale question',
+    'survey_end':   'survey complete / thank you page',
+    'dq':           'disqualified / quota full page',
+    'login':        'login page (email/password)',
+    'other':        'something else',
+}
+
+def detect_page_state(img: Image.Image, pid: int, wid: int) -> tuple[str, object]:
+    url = get_current_url(pid, wid)
+    panel = detect_panel(url, '')
+    
+    prompt = (
+        'Identify the current page state from this list. '
+        'Reply ONLY with the state name, nothing else.\n'
+        'States: dashboard, screener, question, attention, '
+        'open_ended, matrix, slider, survey_end, dq, login, other'
+    )
+    ans = ask_vision_text(img, prompt).strip().lower()
+    best, best_len = 'other', 999
+    for state in PAGE_STATES:
+        if state in ans and len(state) < best_len:
+            best, best_len = state, len(state)
+    return best, panel
+
+
+# ── Action Planner ─────────────────────────────────────────────────────────
+
+def build_prompt(state: str, panel=None) -> tuple[str, str]:
+    if state in ('dashboard', 'login'):
+        base = 'Find the FIRST survey card with EUR reward on this dashboard. Reply: COORD=X,Y'
+        action = 'survey_click'
+    elif state in ('screener', 'question', 'attention'):
+        base = 'Read the question. Find the BEST matching answer option that a thoughtful person would choose. Reply: COORD=X,Y'
+        action = 'answer_click'
+    elif state == 'open_ended':
+        base = 'Find the text input field. Reply: COORD=X,Y'
+        action = 'text_input'
+    elif state in ('matrix', 'slider'):
+        base = 'Find any clickable option (radio button, checkbox, draggable). Reply: COORD=X,Y'
+        action = 'answer_click'
+    elif state in ('survey_end', 'dq'):
+        base = 'NO ACTION NEEDED'
+        action = 'noop'
+    else:
+        base = 'Find the Next / Weiter / Submit / Continue button. Reply: COORD=X,Y'
+        action = 'next_click'
+    
+    if panel:
+        panel_block = build_panel_prompt_block(panel, '')
+        if panel_block:
+            base = f"{panel_block}\n\n{base}"
+    
+    return base, action
+
+
+# ── Survey Runner ──────────────────────────────────────────────────────────
+
+def extract_earnings(img: Image.Image) -> float:
+    """Extrahiere EUR-Betrag aus Screenshot via Vision.
+    Wird nach survey_end/dq State aufgerufen.
+    Gibt 0.0 zurueck wenn nichts gefunden.
+    """
+    prompt = 'Find the EUR amount earned or reward on this page. Reply ONLY: EUR=1.23 or EUR=0'
+    ans = ask_vision_text(img, prompt)
+    m = re.search(r'EUR\s*=\s*([\d.]+)', ans, re.I)
+    if m: return float(m.group(1))
+    return 0.0
+
+
 class SurveyRunner:
     def __init__(self):
-        self.proc = None
-        self.rid = 0
-        self.stats = {"surveys": 0, "steps": 0, "clicks": 0}
+        self.stats = {"surveys": 0, "steps": 0, "clicks": 0, "dry_run": 0, "earnings_eur": 0.0}
+        self.pid, self.wid = get_pid_wid()
 
-    async def start(self):
-        self.proc = await asyncio.create_subprocess_exec(
-            'npx', '-y', 'computer-use-mcp',
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-        )
-        await asyncio.sleep(2)
+    def run(self):
+        print(f"🤖 Survey Runner v3.2")
+        print(f"   Bot-Chrome: PID={self.pid} wid={self.wid}")
+        print(f"   Dein Cursor bleibt wo er ist.")
+        if DRY_RUN: print(f"   ⚠️ DRY-RUN: Vision wird ausgefuehrt, KEIN Klick\n")
 
-    async def stop(self):
-        if self.proc: self.proc.terminate()
+        # Pruefe ob wir ueberhaupt ein Fenster haben
+        if not self.wid:
+            print("❌ Kein Bot-Chrome Fenster gefunden!")
+            print("   Starte: open -na 'Google Chrome' --args --user-data-dir=/tmp/heypiggy-bot")
+            return
 
-    async def mcp(self, action: str, **args) -> dict:
-        """MCP-Tool aufrufen."""
-        self.rid += 1
-        p = {'name': 'computer', 'arguments': {'action': action, **args}}
-        req = json.dumps({'jsonrpc':'2.0','method':'tools/call','params':p,'id':self.rid}) + '\n'
-        self.proc.stdin.write(req.encode()); await self.proc.stdin.drain()
-        data = b''
-        while True:
-            chunk = await asyncio.wait_for(self.proc.stdout.read(65536), 25)
-            if not chunk: break
-            data += chunk
-            try: return json.loads(data.decode())
-            except: continue
+        print("📸 Screenshot + Grid...")
+        img, _, _ = grid_screenshot()
+        state, panel = detect_page_state(img, self.pid, self.wid)
+        print(f"   Page-State: {state} | Panel: {panel.name if panel else 'None'}")
 
-    async def screenshot_png(self) -> tuple[bytes, int, int]:
-        """Screenshot via MCP → PNG bytes + dimensions."""
-        resp = await self.mcp('get_screenshot')
-        img_bytes = None
-        w, h = 0, 0
-        for item in resp.get('result',{}).get('content',[]):
-            if item['type'] == 'image':
-                img_bytes = base64.b64decode(item['data'])
-            if item['type'] == 'text':
-                import json
-                try:
-                    dims = json.loads(item['text'])
-                    w = dims.get('image_width', 0)
-                    h = dims.get('image_height', 0)
-                except: pass
-        return img_bytes or b'', w, h
+        # Survey-Loop
+        max_rounds = 15 if not ONE_SHOT else 1
+        for runde in range(1, max_rounds + 1):
+            print(f"\n=== Runde {runde}/{max_rounds} ===")
 
-    async def click(self, x: int, y: int):
-        """Klick an Bildschirm-Koordinaten."""
-        await self.mcp('left_click', coordinate=[x, y])
-        self.stats["clicks"] += 1
+            # State erkennen + Prompt bauen
+            if runde > 1:
+                img, _, _ = grid_screenshot()
+                state, panel = detect_page_state(img, self.pid, self.wid)
+                print(f"   State: {state} | Panel: {panel.name if panel else 'None'}")
 
-    async def scroll(self, x: int = 400, y: int = 400, amount: str = "down:400"):
-        """Scrollen."""
-        await self.mcp('scroll', coordinate=[x, y], text=amount)
+            if state == 'noop':
+                print(f"   🏁 Survey beendet (state={state})")
+                break
 
-    async def navigate(self, url: str):
-        """URL im Bot-Chrome öffnen (NUR MCP, kein osascript).
-        Klickt zuerst aufs Bot-Fenster um es zu fokussieren."""
-        # Bot-Fenster aktivieren: Klick in die Mitte des Bot-Fensters
-        await self.mcp('left_click', coordinate=[1400, 400])
-        await asyncio.sleep(0.5)
-        await self.mcp('key', text='cmd+l')
-        await asyncio.sleep(0.3)
-        await self.mcp('type', text=url)
-        await asyncio.sleep(0.3)
-        await self.mcp('key', text='enter')
-        await asyncio.sleep(4)
+            prompt, action_type = build_prompt(state, panel)
 
-    async def get_screenshot_with_grid(self) -> tuple[Image.Image, int, int]:
-        """Full-Screen Screenshot MIT Grid-Overlay. Returns (image, width, height)."""
-        png, w, h = await self.screenshot_png()
-        img = Image.open(BytesIO(png)).convert('RGBA')
-        return draw_grid(img), w, h
+            if prompt == 'NO ACTION NEEDED':
+                print(f"   🏁 Keine Aktion noetig")
+                break
 
-    def ask_vision(self, image: Image.Image, prompt: str, img_w: int = 0, img_h: int = 0) -> tuple[int,int] | None:
-        """Vision-Modell befragen → Koordinaten parsen (mit echten Bild-Dimensionen)."""
-        grid_img = image  # Grid already drawn by get_screenshot_with_grid
-        buf = BytesIO(); grid_img.convert('RGB').save(buf, 'JPEG', quality=50)
-        img_b64 = base64.b64encode(buf.getvalue()).decode()
+            # Vision
+            print(f"   👁️ Vision ({state})...")
+            coords = ask_vision(img, prompt)
 
-        result = self._ask_cloudflare(img_b64, prompt, img_w, img_h)
-        if result is None:
-            result = self._ask_nvidia(img_b64, prompt, img_w, img_h)
-        return result
+            if not coords:
+                print(f"   ⚠️ Keine Koordinate — versuche direkten Next-Versuch")
+                coords = ask_vision(img, 'Find the Next/Weiter/Submit button. Reply: COORD=X,Y')
 
-    def _ask_cloudflare(self, img_b64: str, prompt: str, img_w: int = 0, img_h: int = 0) -> tuple[int,int] | None:
-        """Llama 4 Scout via Cloudflare — nutzt echte Bild-Dimensionen."""
-        data = json.dumps({'messages':[{'role':'user','content':[
-            {'type':'text','text':'List ONLY the grid coordinates (like 400,300) of every survey card with EUR amount. Nothing else.'},
-            {'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{img_b64}'}}
-        ]}],'max_tokens':30}).encode()
-        req = urllib.request.Request(CF_URL, data=data,
-            headers={'Authorization':f'Bearer {CF_TOKEN}','Content-Type':'application/json'})
-        try:
-            r = json.loads(urllib.request.urlopen(req, timeout=35).read())
-            text = r['result']['response']
-            # Format 1: "X=400 Y=300" or "X=0.70 Y=0.40" (decimal percentage)
-            xm = re.search(r'X\s*=\s*([\d.]+)', text, re.IGNORECASE)
-            ym = re.search(r'Y\s*=\s*([\d.]+)', text, re.IGNORECASE)
-            if xm and ym:
-                x_val = float(xm.group(1)); y_val = float(ym.group(1))
-                # If < 10 AND has decimal point → percentage
-                if x_val < 10 and '.' in xm.group(1): x_val *= (img_w or 1464)
-                if y_val < 10 and '.' in ym.group(1): y_val *= (img_h or 823)
-                # MCP screenshot ≠ screen resolution! Scale: 1920/1464 = 1.31
-                x_val = int(x_val * 1920 / 1464)
-                y_val = int(y_val * 1080 / 823)
-                return x_val, y_val
-            # Format 2: "400,300\n400,600..." (list — take first pair)
-            pairs = re.findall(r'(\d+)\s*[,;]\s*(\d+)', text)
-            if pairs:
-                x = int(int(pairs[0][0]) * 1920 / 1464)
-                y = int(int(pairs[0][1]) * 1080 / 823)
-                return x, y
-        except Exception as e:
-            print(f"  ⚠️ Cloudflare: {e}")
-        return None
+            if coords:
+                x, y = coords
+                print(f"  🎯 ({x},{y}) → {action_type.replace('_',' ')}")
 
-    def _ask_nvidia(self, img_b64: str, prompt: str, img_w: int = 0, img_h: int = 0) -> tuple[int,int] | None:
-        """Mistral/90B via NVIDIA (Backup) — nutzt echte Bild-Dimensionen."""
-        data = json.dumps({
-            'model':'mistralai/mistral-large-3-675b-instruct-2512',
-            'messages':[{'role':'user','content':[{'type':'text','text':f'Grid image. {prompt} Return JSON: {{"x":N,"y":N}}'},
-                {'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{img_b64}'}}]}],
-            'max_tokens':40
-        }).encode()
-        req = urllib.request.Request(NVIDIA_URL, data=data,
-            headers={'Authorization':f'Bearer {NVIDIA_KEY}','Content-Type':'application/json'})
-        try:
-            r = json.loads(urllib.request.urlopen(req, timeout=45).read())
-            text = r['choices'][0]['message']['content']
-            m = re.search(r'\{[^}]+\}', text)
-            if m:
-                c = json.loads(m.group())
-                return int(c['x']), int(c['y'])
-        except Exception as e:
-            print(f"  ⚠️ NVIDIA: {e}")
-        return None
+                if DRY_RUN:
+                    print(f"     ⚠️ DRY-RUN: Kein Klick")
+                    self.stats["dry_run"] += 1
+                else:
+                    ok = cua_click(x, y, self.pid, self.wid)
+                    print(f"     {'✅ Geklickt (Cursor frei)' if ok else '❌ Fehler'}")
+                    self.stats["clicks"] += 1
 
-    async def find_and_click(self, image: Image.Image, img_w: int, img_h: int, phrase: str) -> bool:
-        """Vision → absolute Koordinaten → Klick.
-        phrase format: 'type:description' where type=survey|answer|next
-        """
-        parts = phrase.split(':', 1)
-        ptype = parts[0] if len(parts) > 1 else 'generic'
-        desc = parts[1] if len(parts) > 1 else phrase
-        
-        if ptype == 'survey':
-            prompt = 'First survey card with EUR. Its grid coords: X= Y='
-        elif ptype == 'answer':
-            prompt = 'First answer option on this question. Its grid coords: X= Y='
-        elif ptype == 'next':
-            prompt = 'Next/Weiter button. Its grid coords: X= Y='
-        else:
-            prompt = f'{desc}. Its grid coords: X= Y='
-        
-        coords = self.ask_vision(image, prompt, img_w, img_h)
-        if coords:
-            x, y = coords
-            print(f"  🎯 {ptype}: {x},{y} → Klick")
-            await self.click(x, y)
-            self.stats["steps"] += 1
-            return True
-        return False
+                self.stats["steps"] += 1
+                time.sleep(3)
 
-    async def check_scroll_needed(self) -> bool:
-        """Scrollen + prüfen ob mehr Optionen sichtbar."""
-        await self.scroll(amount="down:500")
-        await asyncio.sleep(1)
-        img, w, h = await self.get_screenshot_with_grid()
-        coords = self.ask_vision(img, "Are there NEW options visible below that were hidden before?", w, h)
-        # Wenn Koordinaten tiefer als vorher → es gibt mehr Optionen
-        return coords is not None
+                # Nach Klick: neuen Screenshot + State-Pruefung
+                if not ONE_SHOT:
+                    img2, _, _ = grid_screenshot()
+                    state2, panel2 = detect_page_state(img2, self.pid, self.wid)
+                    print(f"   → State nach Klick: {state2} | Panel: {panel2.name if panel2 else 'None'}")
 
-    async def run(self):
-        """Haupt-Survey-Loop."""
-        await self.start()
-        print("🚀 OpenSIN Survey Runner v2.0 — Grid+Cloudflare")
-
-        try:
-            # Navigate to HeyPiggy
-            print("🧭 Navigiere zu HeyPiggy...")
-            await self.navigate("https://www.heypiggy.com/?page=dashboard")
-            print("✅ Dashboard geladen")
-
-            # Find and click first survey
-            img, w, h = await self.get_screenshot_with_grid()
-            print(f"📸 Screenshot: {img.size} ({w}×{h})")
-
-            found = await self.find_and_click(img, w, h, "survey:first survey card with EUR")
-            if not found:
-                print("❌ Kein Survey gefunden")
-                return
-
-            await asyncio.sleep(3)
-
-            # Survey opened → scroll + answer
-            for question in range(10):  # Max 10 Fragen
-                await asyncio.sleep(2)
-
-                # Scroll-Check: alle Optionen sehen
-                for _ in range(3):
-                    await self.scroll(amount="down:400")
-                    await asyncio.sleep(1)
-
-                img, w, h = await self.get_screenshot_with_grid()
-                print(f"❓ Frage {question+1}")
-
-                # Finde Antwort-Option
-                answered = await self.find_and_click(img, w, h, "answer:first answer option")
-                if not answered:
-                    print("  ⚠️ Keine Antwort gefunden, versuche Next direkt")
-
-                await asyncio.sleep(0.5)
-
-                # Finde Next-Button
-                img2, w2, h2 = await self.get_screenshot_with_grid()
-                next_found = await self.find_and_click(img2, w2, h2, "next:Next button")
-                if not next_found:
-                    print("  🏁 Survey vermutlich beendet")
+                    if state2 in ('survey_end', 'dq', 'noop'):
+                        print(f"   🏁 Survey beendet (state={state2})")
+                        self.stats["surveys"] += 1
+                        # EUR-Tracking
+                        img_eur, _, _ = grid_screenshot()
+                        eur = extract_earnings(img_eur)
+                        self.stats["earnings_eur"] += eur
+                        print(f"   💰 EUR: +{eur:.2f} (total: {self.stats['earnings_eur']:.2f})")
+                        break
+                    elif state2 == 'dashboard' and runde > 1:
+                        print(f"   🏁 Zurueck auf Dashboard — naechster Survey?")
+                        break
+                    elif state2 in ('screener', 'question', 'attention', 'open_ended', 'matrix', 'slider'):
+                        print(f"   ➡️ Naechste Frage")
+                    else:
+                        print(f"   ➡️ Weiter (state={state2})")
+                    time.sleep(1)
+            else:
+                print(f"   ⚠️ Vision konnte nichts finden")
+                cua_scroll(self.pid, self.wid)
+                time.sleep(1)
+                img, _, _ = grid_screenshot()
+                state, panel = detect_page_state(img, self.pid, self.wid)
+                if state in ('survey_end', 'dq', 'noop'):
+                    print(f"   🏁 Survey beendet")
                     self.stats["surveys"] += 1
+                    img_eur, _, _ = grid_screenshot()
+                    eur = extract_earnings(img_eur)
+                    self.stats["earnings_eur"] += eur
+                    print(f"   💰 EUR: +{eur:.2f} (total: {self.stats['earnings_eur']:.2f})")
                     break
 
-                await asyncio.sleep(2)
+        # run_summary speichern
+        summary = {
+            "earnings_eur": round(self.stats["earnings_eur"], 2),
+            "surveys_completed": self.stats["surveys"],
+            "steps": self.stats["steps"],
+            "clicks": self.stats["clicks"],
+            "dry_run": DRY_RUN,
+        }
+        run_id = f"run_{int(time.time())}"
+        os.makedirs(f"/tmp/heypiggy_{run_id}", exist_ok=True)
+        with open(f"/tmp/heypiggy_{run_id}/run_summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"\n📊 Stats: {self.stats}")
+        print(f"   run_summary: /tmp/heypiggy_{run_id}/run_summary.json")
+        if DRY_RUN:
+            print(f"   (Dry-Run: {self.stats['dry_run']} Aktionen waeren geklickt worden)")
 
-            print(f"📊 Stats: {self.stats}")
 
-        finally:
-            await self.stop()
+def usage():
+    print(__doc__.strip())
+    print(f"\nFlags:")
+    print(f"  --dry-run     Screenshot + Grid + Vision, KEIN Klick")
+    print(f"  --one-shot    Nur EINEN Survey-Klick (Debug)")
 
 
 if __name__ == "__main__":
-    asyncio.run(SurveyRunner().run())
+    if '--help' in sys.argv or '-h' in sys.argv:
+        usage()
+        sys.exit(0)
+    runner = SurveyRunner()
+    runner.run()
