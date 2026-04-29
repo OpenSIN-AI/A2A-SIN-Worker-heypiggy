@@ -432,12 +432,21 @@ coords = json.loads(response.choices[0].message.content)
 | 🥷 Tarnung (Stealth) | **playstealth-cli** | SIN-CLIs | FREE |
 | 💾 Text-Backup | Puter API + Claude Sonnet | API | FREE |
 
-**⚠️ Mistral Large 3 (675B) ist UNSER neues Vision-Modell:**
-- ✅ Real-Screenshot Vision getestet (beschreibt korrekt)
-- ✅ JSON-Koordinaten im Markdown-Codeblock: `{\"x\":N,\"y\":N}`
-- ✅ Kein Safety-Filter (keine roboterhaften Prompts)
+**Mistral Large 3 (675B) ist UNSER Primär-Vision-Modell:**
+- ✅ Real-Screenshot Vision — beschreibt korrekt
+- ✅ JSON-Koordinaten natürlich (`` `json {\"x\":N,\"y\":N}` ``)
+- ✅ Kein Safety-Filter
 - ✅ FREE NVIDIA NIM Endpoint
-- ⚡ 675B → langsam (~5-10s) aber sehr präzise
+- ⚡ ~5-10s (675B Parameter)
+
+**Alle getesteten NVIDIA-Modelle (29.4.2026):**
+- ✅ `mistralai/mistral-large-3-675b-instruct-2512` — **Vision + JSON** 🏆
+- ✅ `meta/llama-3.2-90b-vision-instruct` — Vision (JSON-enforced)
+- ✅ `meta/llama-3.2-11b-vision-instruct` — Vision (schnell, ungenau)
+- ❌ `z-ai/glm-5` / `glm-5.1` — nicht auf NVIDIA NIM
+- ❌ `google/gemma-3-*` — text-only
+- ❌ `deepseek-ai/deepseek-v4-*` — text-only
+- ❌ `microsoft/phi-3.5-vision` — EOL 15.4.2026
 
 ---
 
