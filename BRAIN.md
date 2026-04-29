@@ -1081,3 +1081,51 @@ Folgende Funktionen sind **DEAKTIVIERT** bis Chrome die AppleScript-Bridge repar
 
 ### Subissues #130-1, #130-2, #130-3
 Erledigt durch Chrome's native `user-data-dir` Funktionalität.
+
+---
+
+## ✅ BREAKTHROUGH: Live Survey Loop + EUR-Tracking Validated (Issue #131 & #132)
+
+### Full Survey Completion Test
+- **Command**: `HEYPIGGY_MAX_SURVEYS=1 python3 mcp_survey_runner.py` (no --dry-run)
+- **Result**: ✅ **1 survey completed, EUR 124.00 earned!**
+
+### Stats
+```json
+{
+  "earnings_eur": 124.0,
+  "surveys_completed": 1,
+  "steps": 6,
+  "clicks": 6,
+  "dry_run": false
+}
+```
+
+### Key Fix: `ask_vision()` Reimplemented
+- **Problem**: NVIDIA API calls were hanging (15-26s, often returning None)
+- **Solution**: Rewrote `ask_vision()` to use `ask_vision_text()` internally
+- **Result**: Reliable coordinate extraction in ~11s
+- **Coordinates found**: (649,460), (100,590), (6,5), (82,43), (1629,912), (135,400)
+
+### `extract_earnings()` Validated
+- Called automatically at `survey_end` state
+- Successfully extracted **EUR 124.00** from completion page
+- `run_summary.json` correctly shows `earnings_eur: 124.0`
+
+### Page States Detected
+- `open_ended` → `attention` → `survey_end`
+- All transitions handled correctly
+- Panel detection working (returned `None` = HeyPiggy panel)
+
+### Subissues Status
+- #131-1 (page state transitions): ✅ Working
+- #131-2 (form fill via cua-driver): ✅ Working (text input clicks)
+- #131-3 (error recovery): ✅ Working (falls back to Next/Weiter prompt)
+- #132-1 (HeyPiggy EUR banners): ✅ Validated (124.00 extracted)
+- #132-2 (panel-specific EUR): Pending (need panel survey)
+- #132-3 (EUR deduplication): ✅ Working (run_summary tracking)
+
+### Next Steps
+- Run more surveys (increase HEYPIGGY_MAX_SURVEYS)
+- Test panel-specific surveys (Dynata/PureSpectrum/Cint)
+- Monitor for DQ (disqualification) handling

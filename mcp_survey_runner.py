@@ -250,17 +250,11 @@ def grid_screenshot(with_som: bool = False) -> tuple[Image.Image, int, int]:
 # ── Vision (Cloudflare / NVIDIA) ───────────────────────────────────────────
 
 def ask_vision(image: Image.Image, prompt: str) -> tuple[int,int] | None:
-    """Vision-Modell befragen → Koordinaten parsen."""
     buf = BytesIO(); image.convert('RGB').save(buf, 'JPEG', quality=50)
-    img_b64 = base64.b64encode(buf.getvalue()).decode()
-
-    # Cloudflare first
-    if CF_TOKEN:
-        result = _ask_cloudflare(img_b64, prompt)
-        if result: return result
-    # NVIDIA fallback
-    if NVIDIA_KEY:
-        return _ask_nvidia(img_b64, prompt)
+    full_prompt = f"Grid overlay visible. {prompt} Reply ONLY with format COORD=X,Y. Nothing else."
+    text = ask_vision_text(image, full_prompt)
+    if text:
+        return _extract_coord(text)
     return None
 
 
