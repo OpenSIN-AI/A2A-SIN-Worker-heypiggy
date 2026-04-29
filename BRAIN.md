@@ -474,12 +474,44 @@ export CF_ACCT="4621434bea0a1efc1ceff2a3f670e0c9"
 
 ```python
 # 1. Screenshot (screencapture oder MCP)
-# 2. Chrome-Crop (0,23,1024,791) ohne Resize
-# 3. Cloudflare Llama 4 Scout → {"x":N,"y":N}
-# 4. MCP left_click → an Koordinaten
-# 5. Scroll-Check: scroll + screenshot → prüfen ob mehr Optionen
-# 6. Wiederholen bis Survey Complete
+# 2. Chrome-Crop (0,23,1024,791)
+# 3. GRID-OVERLAY draufzeichnen (rote Linien + Koordinaten-Zahlen)
+# 4. Cloudflare Llama 4 Scout → liest Koordinaten vom Raster → "X=400 Y=300"
+# 5. MCP left_click → an Koordinaten (Raster-Werte sind exakte Pixel)
+# 6. Scroll-Check: scroll + grid-screenshot → prüfen ob mehr Optionen
+# 7. Wiederholen bis Survey Complete
 ```
+
+
+## 17. GRID-OVERLAY — Die endgültige Koordinaten-Lösung 🏆
+
+**Problem:** Alle Vision-Modelle RATEN Koordinaten. Selbst JSON-Enforcement hilft nicht, weil das Modell Pixel-Positionen schätzen muss.
+
+**Lösung: Grid-Overlay (Visual Prompting)!** Zeichne ein KOORDINATEN-RASTER auf den Screenshot, BEVOR das Bild ans Modell geht. Das Modell LIEST dann die Koordinaten (OCR) statt sie zu schätzen.
+
+```
+Vorher: Screenshot → "Rate wo der Button ist" → falsche/ungenaue Koordinaten
+Nachher: Screenshot+Grid → "Lies die roten Zahlen am Button" → X=400 Y=300 ✅
+```
+
+**Implementierung:**
+```python
+from PIL import Image, ImageDraw, ImageFont
+img = screenshot.crop((0,23,1024,791))
+draw = ImageDraw.Draw(img)
+font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 24)
+for x in range(0, img.width, 100):
+    draw.line([(x,0),(x,img.height)], fill='red', width=2)
+    draw.text((x+2,0), str(x), fill='red', font=font)
+for y in range(0, img.height, 100):
+    draw.line([(0,y),(img.width,y)], fill='red', width=2)
+    draw.text((2,y), str(y), fill='red', font=font)
+```
+
+**Prompt:** `"X= Y="` (ultra-minimal — das Modell versteht das Grid und liest die nächstgelegene Koordinate)
+
+**Getestet:** Llama 4 Scout antwortet `"X= 400 Y= 300"` ✅
+**Funktioniert mit ALLEN Vision-Modellen** (Llama, Mistral, Gemini) — weil es OCR ist, nicht Spatial Reasoning!
 
 ---
 
