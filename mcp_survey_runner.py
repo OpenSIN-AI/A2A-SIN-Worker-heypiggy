@@ -178,13 +178,14 @@ class SurveyRunner:
         try:
             r = json.loads(urllib.request.urlopen(req, timeout=35).read())
             text = r['result']['response']
-            # Format 1: "X=400 Y=300" (single coord)
+            # Format 1: "X=400 Y=300" or "X=0.70 Y=0.40" (decimal percentage)
             xm = re.search(r'X\s*=\s*([\d.]+)', text, re.IGNORECASE)
             ym = re.search(r'Y\s*=\s*([\d.]+)', text, re.IGNORECASE)
             if xm and ym:
                 x_val = float(xm.group(1)); y_val = float(ym.group(1))
-                if x_val < 10 and x_val > 0: x_val *= (img_w or 1464)
-                if y_val < 10 and y_val > 0: y_val *= (img_h or 823)
+                # If < 10 AND has decimal point → percentage
+                if x_val < 10 and '.' in xm.group(1): x_val *= (img_w or 1464)
+                if y_val < 10 and '.' in ym.group(1): y_val *= (img_h or 823)
                 return int(x_val), int(y_val)
             # Format 2: "400,300\n400,600..." (list — take first pair)
             pairs = re.findall(r'(\d+)\s*[,;]\s*(\d+)', text)
@@ -224,13 +225,13 @@ class SurveyRunner:
         desc = parts[1] if len(parts) > 1 else phrase
         
         if ptype == 'survey':
-            prompt = 'List ONLY grid coords (like 400,300) of every survey card with EUR amount. First coords first. Nothing else.'
+            prompt = 'First survey card with EUR. Its grid coords: X= Y='
         elif ptype == 'answer':
-            prompt = 'List ONLY grid coords (like 400,300) of every answer option/radio button/checkbox on this question. First coords first. Nothing else.'
+            prompt = 'First answer option on this question. Its grid coords: X= Y='
         elif ptype == 'next':
-            prompt = 'Give the grid coords of the Next/Weiter/Continue button. Format: X,Y only.'
+            prompt = 'Next/Weiter button. Its grid coords: X= Y='
         else:
-            prompt = f'List ONLY grid coords for: {desc}. First coords first. Nothing else.'
+            prompt = f'{desc}. Its grid coords: X= Y='
         
         coords = self.ask_vision(image, prompt, img_w, img_h)
         if coords:
