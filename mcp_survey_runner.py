@@ -134,12 +134,11 @@ class SurveyRunner:
         await self.mcp('key', text='enter')
         await asyncio.sleep(4)
 
-    async def get_chrome_screenshot(self) -> Image.Image:
-        """Screenshot → Chrome-Crop + Grid-Overlay."""
+    async def get_screenshot_with_grid(self) -> Image.Image:
+        """Full-Screen Screenshot MIT Grid-Overlay. Kein Crop — universell."""
         png = await self.screenshot_png()
         img = Image.open(BytesIO(png)).convert('RGBA')
-        chrome = img.crop((0, 23, min(1024, img.width), min(791, img.height)))
-        return chrome
+        return draw_grid(img)
 
     def ask_vision(self, image: Image.Image, prompt: str, model: str = "cf") -> tuple[int,int] | None:
         """Vision-Modell befragen → Koordinaten parsen."""
@@ -201,14 +200,13 @@ class SurveyRunner:
             print(f"  ⚠️ NVIDIA: {e}")
         return None
 
-    async def find_and_click(self, image: Image.Image, prompt: str, offset_y: int = 23) -> bool:
-        """Vision → Koordinaten → Klick."""
+    async def find_and_click(self, image: Image.Image, prompt: str) -> bool:
+        """Vision → absolute Koordinaten → Klick."""
         coords = self.ask_vision(image, prompt)
         if coords:
             x, y = coords
-            screen_x, screen_y = x, y + offset_y
-            print(f"  🎯 {x},{y} → Klick ({screen_x},{screen_y})")
-            await self.click(screen_x, screen_y)
+            print(f"  🎯 {x},{y} → Klick")
+            await self.click(x, y)
             self.stats["steps"] += 1
             return True
         return False
@@ -217,7 +215,7 @@ class SurveyRunner:
         """Scrollen + prüfen ob mehr Optionen sichtbar."""
         await self.scroll(amount="down:500")
         await asyncio.sleep(1)
-        img = await self.get_chrome_screenshot()
+        img = await self.get_screenshot_with_grid()
         coords = self.ask_vision(img, "Are there NEW options visible below that were hidden before?")
         # Wenn Koordinaten tiefer als vorher → es gibt mehr Optionen
         return coords is not None
@@ -234,7 +232,7 @@ class SurveyRunner:
             print("✅ Dashboard geladen")
 
             # Find and click first survey
-            img = await self.get_chrome_screenshot()
+            img = await self.get_screenshot_with_grid()
             print(f"📸 Screenshot: {img.size}")
 
             found = await self.find_and_click(img, "Find first survey card with EUR amount. Center coords.")
@@ -253,7 +251,7 @@ class SurveyRunner:
                     await self.scroll(amount="down:400")
                     await asyncio.sleep(1)
 
-                img = await self.get_chrome_screenshot()
+                img = await self.get_screenshot_with_grid()
                 print(f"❓ Frage {question+1}")
 
                 # Finde Antwort-Option
@@ -264,7 +262,7 @@ class SurveyRunner:
                 await asyncio.sleep(0.5)
 
                 # Finde Next-Button
-                img = await self.get_chrome_screenshot()
+                img = await self.get_screenshot_with_grid()
                 next_found = await self.find_and_click(img, "Find Next/Weiter button center coords.")
                 if not next_found:
                     print("  🏁 Survey vermutlich beendet")
