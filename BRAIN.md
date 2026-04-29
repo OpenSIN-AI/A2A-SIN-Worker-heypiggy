@@ -539,12 +539,13 @@ for y in range(0, img.height, 100):
     draw.text((2,y), str(y), fill=(255,0,0), font=font)
 ```
 
-**Features:**
-- 25px Grid-Spacing (Haarlinien, decken keinen Content)
-- 100px Hauptlinien (rot, beschriftet)
-- 50px Zwischenmarkierungen (Punkt)
-- Randbeschriftung oben + links + unten + rechts
-- Transparente Farben — stören Vision-Modell nicht
+**Features (SOTA 29.4.2026):**
+- 50px Grid — 100px Hauptlinien (rot, Alpha 70), 50px Haarlinien (Alpha 25)
+- **Separater Overlay-Layer** — Web-Inhalt 100% sichtbar
+- Nur 100px-Kreuzungen beschriftet (reduziert Clutter)
+- Randmarkierungen: 100px = fett, 50px = klein, transparent
+- **Legende unterhalb des Bildes** mit Koordinaten-Erklärung
+- Vision-Modell muss NULL interpolieren — alle sichtbaren Koordinaten sind exakt
 
 **Prompt:** `"X= Y="` (ultra-minimal — das Modell versteht das Grid und liest die nächstgelegene Koordinate)
 
