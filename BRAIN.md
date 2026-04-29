@@ -463,7 +463,30 @@ coords = json.loads(response.choices[0].message.content)
 **Fazit Vision (29.4.2026):** Llama 4 Scout (Cloudflare) = BESTES kostenloses Vision-Modell. Natives JSON, kein Parsing, 17B = schnell.
 
 
-## 15. Cloudflare Workers AI — API Config
+## 15. Cloudflare Workers AI — API Config + ALLE Modelle
+
+**Limits: Sliding Window pro Minute. Kein Daily-Limit. Kein Token-Limit.** 100% bestätigt.
+
+### Vision-Modelle (300 req/min):
+| Modell | Vision | Grid-Overlay | Notiz |
+|--------|--------|-------------|-------|
+| 🏆 **Llama 4 Scout 17B** | ✅ | ✅ `X=400 Y=300` | Unser #1 |
+| Kimi K2.6 (1T) | ❌ Leer | ❌ | Nicht nutzbar |
+| Gemma 4 26B | ❌ Leer | ❌ | Nicht nutzbar |
+| Llama 3.2 11B Vision | ⚠️ Model Agreement | — | Fallback |
+
+### Text-Generation (300 req/min):
+GPT-OSS 120B/20B, Nemotron 3 120B, GLM-4.7-Flash, Llama 3.3 70B, 
+Llama 3.1 70B/8B, Qwen3 30B, QwQ 32B (Reasoning), DeepSeek R1 32B,
+Granite 4.0, Gemma 3 12B
+
+### Text-to-Image (720 req/min):
+- ✅ **Stable Diffusion XL** — getestet, 1024×1024 PNG
+- FLUX.2 (4B/9B/dev) — anderes API-Format nötig
+- dreamshaper-8-lcm, SDXL Lightning
+
+### Speech (720 req/min):
+Whisper Large v3, nova-3, Aura-2 (TTS), melotts
 
 ```bash
 export CF_TOKEN="cfut_..."  # Cloudflare Workers AI Token
