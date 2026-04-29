@@ -306,7 +306,44 @@ if match:
 → Erst wenn ALLE Optionen erfasst → intelligenteste Antwort wählen
 → unmask-cli DOM-Scan + Vision kombinieren für vollständiges Bild
 
-**Puter.js:** 100% kostenlos (User-Pays). REST-API blockiert. Node.js-SDK hat WebSocket-Bug. Nur Browser.
+## 13. Puter.js OpenAI-Compatible API (NEU — 29.4.2026)
+
+**🚀 DAS ist die Lösung für zuverlässige GUI-Koordinaten!**
+
+Puter bietet einen OpenAI-kompatiblen Endpoint. Keine neue SDK nötig — einfach `base_url` tauschen.
+
+**API:** `https://api.puter.com/puterai/openai/v1/`
+**Auth:** Persönlicher Puter-Token (KEIN API-Key, kein Payment!)
+**Model:** `z-ai/glm-5v-turbo` — NATIV trainiert für GUI-Grounding (Bounding Boxes aus Screenshots)
+
+```python
+from openai import OpenAI
+client = OpenAI(
+    base_url="https://api.puter.com/puterai/openai/v1/",
+    api_key="DEIN_PUTER_TOKEN"
+)
+response = client.chat.completions.create(
+    model="z-ai/glm-5v-turbo",
+    messages=[{"role":"user","content":[
+        {"type":"text","text":"Finde den Submit-Button. Gib Koordinaten."},
+        {"type":"image_url","image_url":{"url":f"data:image/png;base64,{img}"}}
+    ]}]
+)
+```
+
+**Vorteile ggü. NVIDIA 90B:**
+- GLM-5V ist SPEZIALISIERT auf GUI-Element-Erkennung
+- Gibt KOORDINATEN als Bounding Boxes, nicht als Text
+- KEIN Safety-Filter-Problem (keine roboterhaften Prompts nötig)
+- 100% KOSTENLOS über Puter User-Pays-Model
+- Kein lokales GPU-RAM-Problem (läuft in Puter-Cloud)
+
+**Roadmap (User-SIN-Browser V1.0):**
+1. OpenCode CLI + NVIDIA NIM (Gehirn)
+2. computer-use-mcp (Hände)  
+3. Puter GLM-5V (Augen — GUI-Grounding)
+4. unmask-cli (Röntgen — Privacy)
+5. playstealth-cli (Tarnung — Anti-Detection)
 
 
 ## 11. Komplettes Tool-Stack (funktionierend)
