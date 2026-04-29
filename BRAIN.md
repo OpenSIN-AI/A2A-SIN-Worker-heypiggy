@@ -570,4 +570,14 @@ for y in range(0, img.height, 100):
 
 ---
 
-*Letzte Aktualisierung: 29. April 2026 — Vision-Modelle finalisiert*
+*Letzte Aktualisierung: 29. April 2026 — Live-Survey-Loop läuft!*
+
+**SurveyRunner Status:**
+- ✅ MCP persistent (startet 1×, bleibt offen)
+- ✅ Screenshot: 219KB, 1464×823
+- ✅ Grid-Overlay: 20px, Llama 4 Scout liest `400,300 400,600...`
+- ✅ MCP `left_click [x,y]`: funktioniert
+- ✅ Navigation: Bot-Fenster-Fokus vor `key`/`type`
+- ⚠️ Prompt: muss Kontext erkennen (Dashboard vs Survey-Frage)
+  - Dashboard: "List grid coords of survey cards with EUR"
+  - Survey: "List grid coords of answer options" + "Find Next button coords"
