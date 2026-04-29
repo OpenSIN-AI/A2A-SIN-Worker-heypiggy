@@ -135,13 +135,20 @@ class SurveyRunner:
         await self.mcp('scroll', coordinate=[x, y], text=amount)
 
     async def navigate(self, url: str):
-        """URL im Browser öffnen."""
+        """URL im Bot-Chrome öffnen. Fokussiert Bot-Fenster VOR Navigation."""
+        # Bot-Fenster nach vorne (window 2 = Bot-Chrome via --user-data-dir)
+        subprocess.run(['osascript','-e','tell app \"Google Chrome\" to set index of window 2 to 1'],
+                       capture_output=True, timeout=3)
+        await asyncio.sleep(0.3)
         await self.mcp('key', text='cmd+l')
         await asyncio.sleep(0.3)
         await self.mcp('type', text=url)
         await asyncio.sleep(0.3)
         await self.mcp('key', text='enter')
         await asyncio.sleep(4)
+        # Fenster zurück nach rechts
+        subprocess.run(['osascript','-e','tell app \"Google Chrome\" to set bounds of front window to {960, 23, 1920, 1080}'],
+                       capture_output=True, timeout=3)
 
     async def get_screenshot_with_grid(self) -> tuple[Image.Image, int, int]:
         """Full-Screen Screenshot MIT Grid-Overlay. Returns (image, width, height)."""

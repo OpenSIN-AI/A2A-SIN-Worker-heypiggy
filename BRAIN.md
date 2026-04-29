@@ -27,11 +27,14 @@ osascript -e 'tell app "Google Chrome" to set bounds of front window to {960, 23
 python3 mcp_survey_runner.py
 ```
 
-**NIEMALS:**
-- ❌ MCP `left_click` ohne vorher zu prüfen WELCHES Fenster aktiv ist
-- ❌ MCP `scroll` wenn User im selben Chrome arbeitet
-- ❌ MCP `key` (cmd+l, enter) — das navigiert User-Tabs weg
-- ❌ Irgendwas ohne explizit Bot-Chrome zu fokussieren
+**🚨 REGEL: NIEMALS andere Navigation als MCP!**
+- MCP `key`/`type`/`navigate` sind die EINZIGEN erlaubten Navigations-Tools
+- Vor jedem `key`/`type`: Bot-Fenster fokussieren!
+  ```python
+  subprocess.run(['osascript','-e','tell app \"Google Chrome\" to set index of window 2 to 1'])
+  await mcp('key', text='cmd+l')
+  ```
+- `left_click [x,y]` und `scroll [x,y]` sind pixel-basiert → immer safe
 
 **🔥 BRIDGE IST TOT — LANG LEBE computer-use-mcp! (28.4.2026, 22:30)**
 
