@@ -183,11 +183,16 @@ class SurveyRunner:
                 # If < 10 AND has decimal point → percentage
                 if x_val < 10 and '.' in xm.group(1): x_val *= (img_w or 1464)
                 if y_val < 10 and '.' in ym.group(1): y_val *= (img_h or 823)
-                return int(x_val), int(y_val)
+                # MCP screenshot ≠ screen resolution! Scale: 1920/1464 = 1.31
+                x_val = int(x_val * 1920 / 1464)
+                y_val = int(y_val * 1080 / 823)
+                return x_val, y_val
             # Format 2: "400,300\n400,600..." (list — take first pair)
             pairs = re.findall(r'(\d+)\s*[,;]\s*(\d+)', text)
             if pairs:
-                return int(pairs[0][0]), int(pairs[0][1])
+                x = int(int(pairs[0][0]) * 1920 / 1464)
+                y = int(int(pairs[0][1]) * 1080 / 823)
+                return x, y
         except Exception as e:
             print(f"  ⚠️ Cloudflare: {e}")
         return None
