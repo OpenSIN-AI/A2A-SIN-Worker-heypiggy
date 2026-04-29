@@ -539,13 +539,16 @@ for y in range(0, img.height, 100):
     draw.text((2,y), str(y), fill=(255,0,0), font=font)
 ```
 
-**Features (SOTA 29.4.2026):**
-- 50px Grid — 100px Hauptlinien (rot, Alpha 70), 50px Haarlinien (Alpha 25)
-- **Separater Overlay-Layer** — Web-Inhalt 100% sichtbar
-- Nur 100px-Kreuzungen beschriftet (reduziert Clutter)
-- Randmarkierungen: 100px = fett, 50px = klein, transparent
-- **Legende unterhalb des Bildes** mit Koordinaten-Erklärung
-- Vision-Modell muss NULL interpolieren — alle sichtbaren Koordinaten sind exakt
+**Features (SOTA 29.4.2026) — 20px Scientific Grid:**
+- **20px Grid-Spacing** — 5× präziser als 100px (±10px Genauigkeit)
+- 100px-Linien: fett, rot, Alpha 90 — beschriftet mit `X,Y`
+- 50px-Linien: dünn, Alpha 55  
+- 20px-Linien: Haar, Alpha 18 — kaum sichtbar, dienen als Referenz
+- Kreuzungen: 100px = große Zahl, 40px = mittel, 60px = zart
+- Randmarkierungen oben + links (alle 20px beschriftet)
+- **Legende** unterhalb: erklärt 100/50/20px Ebenen + Ablese-Präzision
+- Separater Alpha-Layer — Web-Inhalt 100% lesbar dahinter
+- Vision-Modell liest KOORDINATEN direkt ab — kein Raten, kein Rechnen
 
 **Prompt:** `"X= Y="` (ultra-minimal — das Modell versteht das Grid und liest die nächstgelegene Koordinate)
 
