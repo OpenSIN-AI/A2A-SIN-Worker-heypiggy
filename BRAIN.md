@@ -365,6 +365,73 @@ response = client.chat.completions.create(
 - **NIE** 1920px Bilder an NVIDIA schicken (45s Timeout!)
 - **NIE** Cashout/Header-Selektoren ohne 3-Layer-Defense
 - **IMMER** 512px vor Vision-Call (`sips -Z 512`)
+- **IMMER** Separates Chrome-Profil für Automation (NIEMALS User-Chrome!)
+- **IMMER** Scroll-Check VOR jedem Klick (Optionen könnten versteckt sein)
+- **IMMER** JSON-Enforced Prompt für Koordinaten: `{"x":N,"y":N}`
+
+
+## 13. Puter.js OpenAI-Compatible API (DURCHBRUCH — 29.4.2026)
+
+**Puter bietet OpenAI-kompatiblen Endpoint auf `https://api.puter.com/puterai/openai/v1/`**
+
+Keine neue SDK nötig — `base_url` tauschen, eigener Auth-Token als `api_key`.
+
+### Vision-Modelle die FUNKTIONIEREN:
+
+| Model | Text | Vision | Kosten | Speed |
+|-------|------|--------|--------|-------|
+| **`google/gemini-2.5-flash`** | ✅ | ✅ GETESTET | FREE | 🚀 Schnell |
+| `claude-sonnet-4-5` | ✅ | ❌ 502 | FREE | Mittel |
+| `claude-haiku-4-5` | ✅ | ❌ 502 | FREE | Schnell |
+| `z-ai/glm-5v-turbo` | ❌ Leer | ❌ | FREE | — |
+| `gpt-5.4-nano` | ❌ 502 | ❌ | FREE | — |
+
+**→ `google/gemini-2.5-flash` ist UNSER Modell für Vision-Koordinaten!**
+
+```python
+from openai import OpenAI
+client = OpenAI(
+    base_url="https://api.puter.com/puterai/openai/v1/",
+    api_key="DEIN_PUTER_TOKEN"
+)
+response = client.chat.completions.create(
+    model="google/gemini-2.5-flash",
+    messages=[{"role":"user","content":[
+        {"type":"text","text":'Return ONLY JSON: {"x":N,"y":N} for the survey button center.'},
+        {"type":"image_url","image_url":{"url":f"data:image/png;base64,{img}"}}
+    ]}],
+    max_tokens=50, timeout=25
+)
+coords = json.loads(response.choices[0].message.content)
+```
+
+### Workflow (User-SIN-Browser):
+```
+1. NVIDIA NIM (Gehirn) → entscheidet: "Klicke auf Submit-Button"
+2. computer-use-mcp (Hände) → macht Screenshot
+3. Puter API + Gemini Flash (Augen) → analysiert → gibt {x,y} zurück
+4. computer-use-mcp → klickt an (x, y)
+5. Scroll-Check → wiederholen bis alle Optionen erfasst
+```
+
+### Vorteile:
+- **100% KOSTENLOS** (User-Pays-Model, kein Payment nötig)
+- **Kein lokales GPU-RAM-Problem** (läuft in Puter-Cloud)
+- **Gemini Flash** = optimiert für Geschwindigkeit
+- **JSON-Enforced Output** = keine Format-Inkonsistenz
+- **Kein Safety-Filter-Problem** (keine roboterhaften Prompts nötig)
+
+
+## 14. KOMPLETTER TOOL-STACK (final)
+
+| Layer | Tool | Repo | Kosten |
+|-------|------|------|--------|
+| 🧠 Gehirn (Reasoning) | NVIDIA NIM (Llama 3.2 11B/90B) | API | FREE |
+| 👁️ Augen (Vision) | **Puter API + Gemini 2.5 Flash** | API | FREE |
+| 🖐️ Hände (Execute) | **computer-use-mcp** | SIN-CLIs | FREE |
+| 🔍 Röntgen (Analyze) | **unmask-cli** | SIN-CLIs | FREE |
+| 🥷 Tarnung (Stealth) | **playstealth-cli** | SIN-CLIs | FREE |
+| 💾 Backup-Text | Puter API + Claude Sonnet | API | FREE |
 
 ---
 
