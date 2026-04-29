@@ -163,8 +163,19 @@ class SurveyRunner:
         try:
             r = json.loads(urllib.request.urlopen(req, timeout=35).read())
             text = r['result']['response']
-            nums = re.findall(r'(\d+)', text)
-            if len(nums) >= 2: return int(nums[0]), int(nums[1])
+            # Parse X=... Y=... — handles BOTH "X=400 Y=300" AND "X=0.80 Y=0.11"
+            import re
+            xm = re.search(r'X\s*=\s*([\d.]+)', text, re.IGNORECASE)
+            ym = re.search(r'Y\s*=\s*([\d.]+)', text, re.IGNORECASE)
+            if xm and ym:
+                x_val = float(xm.group(1))
+                y_val = float(ym.group(1))
+                # If < 10, it's normalized (percentage) → convert to pixels
+                if x_val < 10 and x_val > 0:
+                    x_val = int(x_val * 1024)  # 1024 = Chrome width
+                if y_val < 10 and y_val > 0:
+                    y_val = int(y_val * 768)   # 768 = Chrome height
+                return int(x_val), int(y_val)
         except Exception as e:
             print(f"  ⚠️ Cloudflare: {e}")
         return None
