@@ -425,8 +425,18 @@ coords = json.loads(response.choices[0].message.content)
 | Layer | Tool | Repo | Kosten |
 |-------|------|------|--------|
 | 🧠 Gehirn (Reasoning) | NVIDIA NIM (Llama 3.2 11B/90B) | API | FREE |
-| 👁️ Augen (Vision) | **NVIDIA Mistral Large 3 (675B)** 🆕 | API | FREE |
-| 🔄 Backup Vision | NVIDIA Llama 3.2 90B (JSON-enforced) | API | FREE |
+| 👁️ Augen (Vision) | **Cloudflare Llama 4 Scout (17B)** 🏆 | API | FREE |
+| 🔄 Backup Vision | NVIDIA Mistral Large 3 (675B) | API | FREE |
+| 🔄 Backup 2 | NVIDIA Llama 90B (JSON-enforced) | API | FREE |
+
+**🏆 Llama 4 Scout (Cloudflare Workers AI) ist UNSER Primär-Vision-Modell:**
+- ✅ Real-Screenshot Vision — präzise Beschreibungen
+- ✅ **Natives JSON-Output:** `{\"x\":176,\"y\":445}` — KEIN Parsing nötig!
+- ✅ 17B MoE (16 Experts) — schneller als Mistral 675B
+- ✅ 100% KOSTENLOS (Workers AI Free Tier)
+- ✅ Kein Safety-Filter
+- ⚡ ~2-4s (17B vs 675B)
+- API: `https://api.cloudflare.com/client/v4/accounts/{ID}/ai/run/@cf/meta/llama-4-scout-17b-16e-instruct`
 | 🖐️ Hände (Execute) | **computer-use-mcp** | SIN-CLIs | FREE |
 | 🔍 Röntgen (Analyze) | **unmask-cli** | SIN-CLIs | FREE |
 | 🥷 Tarnung (Stealth) | **playstealth-cli** | SIN-CLIs | FREE |
@@ -439,14 +449,16 @@ coords = json.loads(response.choices[0].message.content)
 - ✅ FREE NVIDIA NIM Endpoint
 - ⚡ ~5-10s (675B Parameter)
 
-**Alle getesteten NVIDIA-Modelle (29.4.2026):**
-- ✅ `mistralai/mistral-large-3-675b-instruct-2512` — **Vision + JSON** 🏆
-- ✅ `meta/llama-3.2-90b-vision-instruct` — Vision (JSON-enforced)
-- ✅ `meta/llama-3.2-11b-vision-instruct` — Vision (schnell, ungenau)
-- ❌ `z-ai/glm-5` / `glm-5.1` — nicht auf NVIDIA NIM
-- ❌ `google/gemma-3-*` — text-only
-- ❌ `deepseek-ai/deepseek-v4-*` — text-only
-- ❌ `microsoft/phi-3.5-vision` — EOL 15.4.2026
+**Alle getesteten Modelle (29.4.2026):**
+- 🏆 `@cf/meta/llama-4-scout-17b-16e-instruct` — **Cloudflare Workers AI** ✅ Vision + JSON nativ
+- ✅ `mistralai/mistral-large-3-675b-instruct-2512` — **NVIDIA NIM** Vision + JSON (Markdown)
+- ✅ `meta/llama-3.2-90b-vision-instruct` — **NVIDIA NIM** Vision (JSON-enforced)
+- ✅ `meta/llama-3.2-11b-vision-instruct` — **NVIDIA NIM** Vision (schnell, ungenau)
+- ❌ Cloudflare AI Gateway — braucht Provider-Keys
+- ❌ Puter SDK (Node.js) — WebSocket-Bug
+- ❌ Puter OpenAI-API — leere Vision-Antworten
+
+**Fazit Vision (29.4.2026):** Mistral Large 3 (675B) = BESTES kostenloses Vision-Modell.
 
 ---
 
