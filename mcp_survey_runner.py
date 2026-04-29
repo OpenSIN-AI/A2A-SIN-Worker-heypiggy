@@ -215,12 +215,27 @@ class SurveyRunner:
             print(f"  ⚠️ NVIDIA: {e}")
         return None
 
-    async def find_and_click(self, image: Image.Image, img_w: int, img_h: int, prompt: str) -> bool:
-        """Vision → absolute Koordinaten → Klick."""
+    async def find_and_click(self, image: Image.Image, img_w: int, img_h: int, phrase: str) -> bool:
+        """Vision → absolute Koordinaten → Klick.
+        phrase format: 'type:description' where type=survey|answer|next
+        """
+        parts = phrase.split(':', 1)
+        ptype = parts[0] if len(parts) > 1 else 'generic'
+        desc = parts[1] if len(parts) > 1 else phrase
+        
+        if ptype == 'survey':
+            prompt = 'List ONLY grid coords (like 400,300) of every survey card with EUR amount. First coords first. Nothing else.'
+        elif ptype == 'answer':
+            prompt = 'List ONLY grid coords (like 400,300) of every answer option/radio button/checkbox on this question. First coords first. Nothing else.'
+        elif ptype == 'next':
+            prompt = 'Give the grid coords of the Next/Weiter/Continue button. Format: X,Y only.'
+        else:
+            prompt = f'List ONLY grid coords for: {desc}. First coords first. Nothing else.'
+        
         coords = self.ask_vision(image, prompt, img_w, img_h)
         if coords:
             x, y = coords
-            print(f"  🎯 {x},{y} → Klick")
+            print(f"  🎯 {ptype}: {x},{y} → Klick")
             await self.click(x, y)
             self.stats["steps"] += 1
             return True
@@ -250,7 +265,7 @@ class SurveyRunner:
             img, w, h = await self.get_screenshot_with_grid()
             print(f"📸 Screenshot: {img.size} ({w}×{h})")
 
-            found = await self.find_and_click(img, w, h, "Find first survey card with EUR amount. Center coords.")
+            found = await self.find_and_click(img, w, h, "survey:first survey card with EUR")
             if not found:
                 print("❌ Kein Survey gefunden")
                 return
@@ -270,7 +285,7 @@ class SurveyRunner:
                 print(f"❓ Frage {question+1}")
 
                 # Finde Antwort-Option
-                answered = await self.find_and_click(img, w, h, "Find the safest/neutral answer option. Its center coords.")
+                answered = await self.find_and_click(img, w, h, "answer:first answer option")
                 if not answered:
                     print("  ⚠️ Keine Antwort gefunden, versuche Next direkt")
 
@@ -278,7 +293,7 @@ class SurveyRunner:
 
                 # Finde Next-Button
                 img2, w2, h2 = await self.get_screenshot_with_grid()
-                next_found = await self.find_and_click(img2, w2, h2, "Find Next/Weiter button center coords.")
+                next_found = await self.find_and_click(img2, w2, h2, "next:Next button")
                 if not next_found:
                     print("  🏁 Survey vermutlich beendet")
                     self.stats["surveys"] += 1
