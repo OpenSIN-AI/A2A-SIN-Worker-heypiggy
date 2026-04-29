@@ -517,19 +517,34 @@ Vorher: Screenshot → "Rate wo der Button ist" → falsche/ungenaue Koordinaten
 Nachher: Screenshot+Grid → "Lies die roten Zahlen am Button" → X=400 Y=300 ✅
 ```
 
-**Implementierung:**
+**Implementierung (SOTA Grid-Overlay):**
 ```python
 from PIL import Image, ImageDraw, ImageFont
 img = screenshot.crop((0,23,1024,791))
 draw = ImageDraw.Draw(img)
-font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 24)
+font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 10)
+SPACING = 25  # Ultra-fein: alle 25px
+for x in range(0, img.width, SPACING):
+    is_100 = (x % 100 == 0)
+    color = (255,60,60) if is_100 else (255,160,160)  # 100er: rot, 25er: hellrot
+    draw.line([(x,0),(x,img.height)], fill=color, width=1 if is_100 else 0)  # Hairline
+for y in range(0, img.height, SPACING):
+    is_100 = (y % 100 == 0)
+    color = (255,60,60) if is_100 else (255,160,160)
+    draw.line([(0,y),(img.width,y)], fill=color, width=1 if is_100 else 0)
+# Nur 100er-Raster beschriften (nicht 25er — zu viele Zahlen)
 for x in range(0, img.width, 100):
-    draw.line([(x,0),(x,img.height)], fill='red', width=2)
-    draw.text((x+2,0), str(x), fill='red', font=font)
+    draw.text((x+2,2), str(x), fill=(255,0,0), font=font)
 for y in range(0, img.height, 100):
-    draw.line([(0,y),(img.width,y)], fill='red', width=2)
-    draw.text((2,y), str(y), fill='red', font=font)
+    draw.text((2,y), str(y), fill=(255,0,0), font=font)
 ```
+
+**Features:**
+- 25px Grid-Spacing (Haarlinien, decken keinen Content)
+- 100px Hauptlinien (rot, beschriftet)
+- 50px Zwischenmarkierungen (Punkt)
+- Randbeschriftung oben + links + unten + rechts
+- Transparente Farben — stören Vision-Modell nicht
 
 **Prompt:** `"X= Y="` (ultra-minimal — das Modell versteht das Grid und liest die nächstgelegene Koordinate)
 
