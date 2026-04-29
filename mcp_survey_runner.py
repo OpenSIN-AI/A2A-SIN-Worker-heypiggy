@@ -163,7 +163,7 @@ class SurveyRunner:
     def _ask_cloudflare(self, img_b64: str, prompt: str, img_w: int = 0, img_h: int = 0) -> tuple[int,int] | None:
         """Llama 4 Scout via Cloudflare — nutzt echte Bild-Dimensionen."""
         data = json.dumps({'messages':[{'role':'user','content':[
-            {'type':'text','text':f'Grid image. Read nearest red coordinate numbers to the target. {prompt} Answer: X= Y='},
+            {'type':'text','text':'List ONLY the grid coordinates (like 400,300) of every survey card with EUR amount. Nothing else.'},
             {'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{img_b64}'}}
         ]}],'max_tokens':30}).encode()
         req = urllib.request.Request(CF_URL, data=data,
@@ -171,6 +171,7 @@ class SurveyRunner:
         try:
             r = json.loads(urllib.request.urlopen(req, timeout=35).read())
             text = r['result']['response']
+            # Format 1: "X=400 Y=300" (single coord)
             xm = re.search(r'X\s*=\s*([\d.]+)', text, re.IGNORECASE)
             ym = re.search(r'Y\s*=\s*([\d.]+)', text, re.IGNORECASE)
             if xm and ym:
@@ -178,6 +179,10 @@ class SurveyRunner:
                 if x_val < 10 and x_val > 0: x_val *= (img_w or 1464)
                 if y_val < 10 and y_val > 0: y_val *= (img_h or 823)
                 return int(x_val), int(y_val)
+            # Format 2: "400,300\n400,600..." (list — take first pair)
+            pairs = re.findall(r'(\d+)\s*[,;]\s*(\d+)', text)
+            if pairs:
+                return int(pairs[0][0]), int(pairs[0][1])
         except Exception as e:
             print(f"  ⚠️ Cloudflare: {e}")
         return None
