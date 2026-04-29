@@ -73,12 +73,6 @@ def cua_click_element(pid: int, element_id: int) -> bool:
     resp = cua_call('click_element', {'pid': pid, 'element_id': element_id})
     return 'posted' in json.dumps(resp).lower()
 
-def cua_click(x: int, y: int, pid: int | None = None, wid: int | None = None) -> bool:
-    """Click via cua-driver at screen coordinates. Cursor stays."""
-    if pid is None or wid is None: pid, wid = get_pid_wid()
-    resp = cua_call('click', {'pid': pid, 'window_id': wid, 'x': x, 'y': y})
-    return 'posted' in json.dumps(resp).lower()
-
 def cua_get_window_state(pid: int, wid: int) -> dict:
     return cua_call('get_window_state', {'pid': pid, 'window_id': wid})
 
@@ -104,11 +98,7 @@ def get_ax_elements(pid: int, wid: int) -> list[dict]:
 def click_ax_element_by_text(elements: list[dict], target_text: str, pid: int) -> bool:
     target_lower = target_text.lower()
     for el in elements:
-        if not el['clickable']: continue
-        text_lower = el['text'].lower()
-        if 'nicht weiter laden' in text_lower or 'reload' in text_lower:
-            continue
-        if target_lower in text_lower:
+        if el['clickable'] and target_lower in el['text'].lower():
             print(f"   🎯 AX-Click: [{el['id']}] {el['role']} \"{el['text']}\"")
             if not DRY_RUN:
                 return cua_click_element(pid, el['id'])
@@ -148,25 +138,6 @@ def ask_vision_text(image: Image.Image, prompt: str) -> str:
         resp = json.loads(urllib.request.urlopen(req, timeout=60).read())
         return resp['choices'][0]['message']['content']
     except: return ""
-
-def ask_vision(image: Image.Image, prompt: str) -> tuple[int,int] | None:
-    full_prompt = f"{prompt}. Reply ONLY with format COORD=X,Y. Nothing else."
-    text = ask_vision_text(image, full_prompt)
-    if text:
-        return _extract_coord(text)
-    return None
-
-def _extract_coord(text: str) -> tuple[int,int] | None:
-    m = re.search(r'COORD\s*[=:]\s*(\d+)\s*[,;]\s*(\d+)', text, re.I)
-    if not m:
-        xm = re.search(r'X\s*=\s*(\d+)', text, re.I)
-        ym = re.search(r'Y\s*=\s*(\d+)', text, re.I)
-        if xm and ym: return (int(xm.group(1)), int(ym.group(1)))
-        pairs = re.findall(r'(\d+)\s*[,;]\s*(\d+)', text)
-        if pairs: return (int(pairs[0][0]), int(pairs[0][1]))
-    if m:
-        return (int(m.group(1)), int(m.group(2)))
-    return None
 
 def detect_page_state(img: Image.Image, pid: int, wid: int) -> tuple[str, object]:
     from panel_overrides import detect_panel
@@ -238,7 +209,8 @@ class SurveyRunner:
             return
 
         print("📸 Screenshot...")
-        img = Image.open(BytesIO(cua_screenshot_bytes())).convert('RGB')
+        png = cua_screenshot_bytes()
+        img = Image.open(BytesIO(png)).convert('RGB')
         state, panel = detect_page_state(img, self.pid, self.wid)
         print(f"   Page-State: {state} | Panel: {panel.name if panel else 'None'}")
 
@@ -247,7 +219,8 @@ class SurveyRunner:
             print(f"\n=== Runde {runde}/{max_rounds} ===")
 
             if runde > 1:
-                img = Image.open(BytesIO(cua_screenshot_bytes())).convert('RGB')
+                png = cua_screenshot_bytes()
+                img = Image.open(BytesIO(png)).convert('RGB')
                 state, panel = detect_page_state(img, self.pid, self.wid)
                 print(f"   State: {state} | Panel: {panel.name if panel else 'None'}")
 
@@ -269,17 +242,22 @@ class SurveyRunner:
                 clicked = click_ax_element_by_text(ax_elements, 'EUR', self.pid)
             elif action_type == 'answer_click':
                 clicked = click_ax_element_by_text(ax_elements, 'Weiter', self.pid)
-                if not clicked: clicked = click_ax_element_by_text(ax_elements, 'Next', self.pid)
-                if not clicked: clicked = click_ax_element_by_text(ax_elements, 'Submit', self.pid)
-                if not clicked: clicked = click_ax_element_by_text(ax_elements, 'Continue', self.pid)
+                if not clicked:
+                    clicked = click_ax_element_by_text(ax_elements, 'Next', self.pid)
+                if not clicked:
+                    clicked = click_ax_element_by_text(ax_elements, 'Submit', self.pid)
+                if not clicked:
+                    clicked = click_ax_element_by_text(ax_elements, 'Continue', self.pid)
             elif action_type == 'next_click':
                 clicked = click_ax_element_by_text(ax_elements, 'Weiter', self.pid)
-                if not clicked: clicked = click_ax_element_by_text(ax_elements, 'Next', self.pid)
+                if not clicked:
+                    clicked = click_ax_element_by_text(ax_elements, 'Next', self.pid)
             elif action_type == 'text_input':
                 clicked = click_ax_element_by_text(ax_elements, 'textarea', self.pid)
 
             if not clicked:
                 print(f"   ⚠️ Keine AX-Element gefunden — Vision Fallback...")
+                from mcp_survey_runner import ask_vision
                 coords = ask_vision(img, prompt)
                 if coords:
                     x, y = coords
@@ -287,6 +265,7 @@ class SurveyRunner:
                     if valid:
                         print(f"  🎯 ({x},{y}) → {action_type.replace('_',' ')} (Vision)")
                         if not DRY_RUN:
+                            from mcp_survey_runner import cua_click
                             ok = cua_click(x, y, self.pid, self.wid)
                             print(f"     {'✅ Geklickt' if ok else '❌ Fehler'}")
                             self.stats["clicks"] += 1
@@ -299,7 +278,8 @@ class SurveyRunner:
             time.sleep(3)
 
             if not ONE_SHOT:
-                img2 = Image.open(BytesIO(cua_screenshot_bytes())).convert('RGB')
+                png2 = cua_screenshot_bytes()
+                img2 = Image.open(BytesIO(png2)).convert('RGB')
                 state2, panel2 = detect_page_state(img2, self.pid, self.wid)
                 print(f"   → State nach Klick: {state2} | Panel: {panel2.name if panel2 else 'None'}")
 
