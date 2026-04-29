@@ -425,11 +425,19 @@ coords = json.loads(response.choices[0].message.content)
 | Layer | Tool | Repo | Kosten |
 |-------|------|------|--------|
 | 🧠 Gehirn (Reasoning) | NVIDIA NIM (Llama 3.2 11B/90B) | API | FREE |
-| 👁️ Augen (Vision) | **Puter API + Gemini 2.5 Flash** | API | FREE |
+| 👁️ Augen (Vision) | **NVIDIA Mistral Large 3 (675B)** 🆕 | API | FREE |
+| 🔄 Backup Vision | NVIDIA Llama 3.2 90B (JSON-enforced) | API | FREE |
 | 🖐️ Hände (Execute) | **computer-use-mcp** | SIN-CLIs | FREE |
 | 🔍 Röntgen (Analyze) | **unmask-cli** | SIN-CLIs | FREE |
 | 🥷 Tarnung (Stealth) | **playstealth-cli** | SIN-CLIs | FREE |
-| 💾 Backup-Text | Puter API + Claude Sonnet | API | FREE |
+| 💾 Text-Backup | Puter API + Claude Sonnet | API | FREE |
+
+**⚠️ Mistral Large 3 (675B) ist UNSER neues Vision-Modell:**
+- ✅ Real-Screenshot Vision getestet (beschreibt korrekt)
+- ✅ JSON-Koordinaten im Markdown-Codeblock: `{\"x\":N,\"y\":N}`
+- ✅ Kein Safety-Filter (keine roboterhaften Prompts)
+- ✅ FREE NVIDIA NIM Endpoint
+- ⚡ 675B → langsam (~5-10s) aber sehr präzise
 
 ---
 
