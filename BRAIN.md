@@ -570,14 +570,37 @@ for y in range(0, img.height, 100):
 
 ---
 
-*Letzte Aktualisierung: 29. April 2026 — Live-Survey-Loop läuft!*
+## 19. KOORDINATEN-SKALIERUNG (CRITICAL BUG GEFUNDEN! 29.4.2026)
 
-**SurveyRunner Status:**
-- ✅ MCP persistent (startet 1×, bleibt offen)
-- ✅ Screenshot: 219KB, 1464×823
-- ✅ Grid-Overlay: 20px, Llama 4 Scout liest `400,300 400,600...`
-- ✅ MCP `left_click [x,y]`: funktioniert
-- ✅ Navigation: Bot-Fenster-Fokus vor `key`/`type`
-- ⚠️ Prompt: muss Kontext erkennen (Dashboard vs Survey-Frage)
-  - Dashboard: "List grid coords of survey cards with EUR"
-  - Survey: "List grid coords of answer options" + "Find Next button coords"
+**MCP `get_screenshot` ≠ Bildschirm-Auflösung!**
+
+- MCP Screenshot: **1464×823** Pixel
+- Tatsächlicher Bildschirm: **1920×1080** Pixel
+- **Skalierungsfaktor: 1.31× (1920/1464)**
+
+**ALLE Grid-Koordinaten müssen skaliert werden:**
+```
+screen_X = grid_X * (1920 / 1464)  # = grid_X * 1.311
+screen_Y = grid_Y * (1080 / 823)   # = grid_Y * 1.312
+```
+
+**Ohne Skalierung → Klicks landen 31% daneben → Lesezeichenleiste statt Survey!**
+Dieser Bug erklärt ALLE Fehlklicks der letzten Stunden.
+
+## 18. ERFOLGREICHER SURVEY-KLICK (29.4.2026 07:30) 🎉
+
+**Der erste Survey-Klick via MCP hat funktioniert!**
+
+**Exakt so wurde es gemacht:**
+1. Bot-Chrome gestartet: `open -na "Google Chrome" --args --user-data-dir=/tmp/heypiggy-bot --new-window "https://www.heypiggy.com/?page=dashboard"`
+2. MCP `left_click [1400,400]` → aktiviert Bot-Fenster
+3. MCP `key cmd+l` → `type URL` → `key enter` → Navigation NUR via MCP
+4. MCP `get_screenshot` → 1464×823 PNG
+5. Grid-Overlay drauf (20px, rote Linien + Zahlen an 100px-Kreuzungen)
+6. JPEG komprimiert → Llama 4 Scout via Cloudflare
+7. Prompt: `"First survey card with EUR. Its grid coords: X= Y="`
+8. Llama 4 Scout antwortet: `"X=100 Y=300"` → Parser extrahiert
+9. MCP `left_click [100,300]` → **SURVEY GEÖFFNET!**
+
+**Koordinaten variieren pro Frage:** 100,300 → 200,300 → 200,400
+**21 Klicks in 10 Runden** — der Loop läuft!
