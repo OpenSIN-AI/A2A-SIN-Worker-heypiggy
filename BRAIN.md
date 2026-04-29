@@ -380,13 +380,11 @@ Keine neue SDK nötig — `base_url` tauschen, eigener Auth-Token als `api_key`.
 
 | Model | Text | Vision | Kosten | Speed |
 |-------|------|--------|--------|-------|
-| **`google/gemini-2.5-flash`** | ✅ | ✅ GETESTET | FREE | 🚀 Schnell |
+| **`google/gemini-2.5-flash`** | ✅ (Text) | ⚠️ Leer bei echten Screenshots | FREE | 🚀 |
 | `claude-sonnet-4-5` | ✅ | ❌ 502 | FREE | Mittel |
 | `claude-haiku-4-5` | ✅ | ❌ 502 | FREE | Schnell |
-| `z-ai/glm-5v-turbo` | ❌ Leer | ❌ | FREE | — |
-| `gpt-5.4-nano` | ❌ 502 | ❌ | FREE | — |
 
-**→ `google/gemini-2.5-flash` ist UNSER Modell für Vision-Koordinaten!**
+**→ Puter Vision unzuverlässig für reale Screenshots. NVIDIA 90B bleibt primär.**
 
 ```python
 from openai import OpenAI
