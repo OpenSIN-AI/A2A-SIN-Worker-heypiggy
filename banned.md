@@ -9,7 +9,7 @@
 6. **Globale State-Speicherung** — Kein Shared-Mutable-State zwischen Runs
 
 ## ✅ Erlaubt (Stealth Triade)
-1. **skylight-cli** — Screenshot via SkyLight.framework, CGEventPostToPid
+1. **skylight-cli** — Screenshot via Accessibility API, AXPress (Accessibility API)
 2. **playstealth-cli** — Browser-Start mit Fingerprint-Schutz
 3. **unmask-cli** — Stealth-Verification und Bot-Detection
 4. **cua-driver** — Fallback-MVP (gleiche SkyLight-API)
