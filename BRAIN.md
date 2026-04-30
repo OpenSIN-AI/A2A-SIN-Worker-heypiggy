@@ -2,6 +2,10 @@
 
 > **CEO-Level Erkenntnisse vom 30. April 2026 (AKTUALISIERT).**
 > **🔥 AXPress-Durchbruch: Klick funktioniert auf Chrome 148 / macOS 26!**
+> **AKTUELLER STAND (30.4.2026):** Stealth-Quad ist aktiv. Profile in `stealth-runner/profiles/jeremy.yaml`.
+> Login: `stealth-runner/cli/heypiggy-login`. Survey: `stealth-runner/cli/heypiggy-survey-*`.
+> screen-follow zeichnet alles auf. Alle Docs auf SOTA-Niveau.
+
 
 ## 💀 STATUS: ARCHIVIERT
 
