@@ -1,8 +1,34 @@
 # BRAIN.md — A2A-SIN-Worker-heypiggy Knowledge Base
 
-> **CEO-Level Erkenntnisse vom 28. April 2026.**
-> Diese Datei ist die zentrale Wissensbasis für jeden Agenten, der
-> an diesem Repository arbeitet. Lies das VOR jeder Änderung.
+> **CEO-Level Erkenntnisse vom 30. April 2026 (AKTUALISIERT).**
+> **🔥 AXPress-Durchbruch: Klick funktioniert auf Chrome 148 / macOS 26!**
+
+## 💀 STATUS: ARCHIVIERT
+
+Dieser Worker ist **archiviert**. Der CDP/Bridge-Ansatz wurde durch die **Stealth-Triade** ersetzt:
+
+```
+playstealth-cli (HIDE) → skylight-cli (ACT) → unmask-cli (SENSE)
+```
+
+Der `stealth-runner` in `~/dev/stealth-runner` ist der aktive Nachfolger.
+Panel-Detektoren und Reward-Logik wurden nach dort extrahiert.
+
+## 🔥 KERNWISSEN: Klick-Mechanismus (30.4.2026)
+
+- `CGEventPostToPid` und `CGEvent.post` werden von Chrome 148 **ignoriert**
+- **Einzig funktionierender Klick:** `AXUIElementPerformAction(element, kAXPressAction)`
+- Chrome braucht `--force-renderer-accessibility` Flag für Web-Elemente im AX-Tree
+- **NIEMALS `--x`/`--y` benutzen** → Nur `--element-index` aus skylight-cli JSON
+- AX-Frame-Koordinaten sind BEREITS absolut (0,0 = Apple-Menü oben links!)
+
+## NVIDIA Vision Model
+
+**Mistral hat KEIN Vision-Modell** (Text-only). Vision-fähig über NVIDIA:
+- ⭐ `meta/llama-3.2-90b-vision-instruct` (BESTE)
+- `meta/llama-3.2-11b-vision-instruct` (schneller)
+- `nvidia/neva-22b` (NVIDIA-eigen)
+- API: `https://integrate.api.nvidia.com/v1/chat/completions` mit `nvapi-...` Key
 
 ---
 
