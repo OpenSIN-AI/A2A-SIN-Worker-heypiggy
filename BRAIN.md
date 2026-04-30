@@ -5,6 +5,8 @@
 
 ## 💀 STATUS: ARCHIVIERT
 
+⚠️ Der gesamte Abschnitt "Klick-Mechanismen" unten ist HISTORISCH. CGEventPostToPid funktioniert NICHT auf Chrome 148/macOS 26. Die aktive Lösung ist AXPress (Accessibility API) + VoiceOver-Trick. Siehe `stealth-runner/brain.md`.
+
 Dieser Worker ist **archiviert**. Der CDP/Bridge-Ansatz wurde durch die **Stealth-Triade** ersetzt:
 
 ```
