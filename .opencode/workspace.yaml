@@ -1,0 +1,22 @@
+# A2A-SIN-Worker-heypiggy — ARCHIVIERT
+# CDP/Bridge-Ansatz ersetzt durch Stealth-Triade
+role: archive
+successor: stealth-runner
+
+repos:
+  - name: stealth-runner
+    url: https://github.com/OpenSIN-AI/stealth-runner
+    role: orchestrator (aktiver Nachfolger)
+  - name: skylight-cli
+    url: https://github.com/SIN-CLIs/skylight-cli
+    role: act-layer
+  - name: unmask-cli
+    url: https://github.com/SIN-CLIs/unmask-cli
+    role: sense-layer
+  - name: playstealth-cli
+    url: https://github.com/SIN-CLIs/playstealth-cli
+    role: hide-layer
+  - name: heypiggy-worker
+    url: https://github.com/OpenSIN-AI/A2A-SIN-Worker-heypiggy
+    role: archive
+    note: Panel-Detektoren + Reward-Logik nach stealth-runner extrahiert
