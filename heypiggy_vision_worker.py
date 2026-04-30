@@ -114,6 +114,10 @@ from answer_router import (
     build_router_prompt_block,
     route_answer,
 )
+from answer_history import (
+    record_success,
+    record_failure,
+)
 from session_store import (
     dump_session as _session_dump,
     restore_session as _session_restore,
@@ -5681,7 +5685,38 @@ async def dom_prescan():
                 page_url=_panel_url or "",
             )
             router_block = build_router_prompt_block(decision)
-            if router_block:
+
+            skip_vision = False
+            if decision and decision.target_option and decision.strategy != Strategy.ASK_VISION:
+                try:
+                    audit("direct_click_try", target=decision.target_option, strategy=decision.strategy)
+                    click_result = await click_visible_choice_with_text(decision.target_option)
+                    if click_result and click_result.get("clicked"):
+                        audit("direct_click_success",
+                                  target=decision.target_option,
+                                  strategy=decision.strategy,
+                                  reason=decision.reason[:100] if decision.reason else "")
+                        record_success(
+                            _LAST_QUESTION_TEXT or "",
+                            decision.target_option,
+                            panel=getattr(decision, "panel", None),
+                            question_type=getattr(decision, "question_type", None),
+                        )
+                        skip_vision = True
+                    else:
+                        audit("direct_click_not_found", target=decision.target_option)
+                        record_failure(
+                            _LAST_QUESTION_TEXT or "",
+                            decision.target_option,
+                            panel=getattr(decision, "panel", None),
+                            question_type=getattr(decision, "question_type", None),
+                        )
+                except Exception as e:
+                    audit("direct_click_failed",
+                          target=decision.target_option,
+                          error=str(e)[:100])
+
+            if router_block and not skip_vision:
                 audit(
                     "answer_routed",
                     qtype=decision.question_type,
@@ -6812,40 +6847,14 @@ async def escalating_click(
                     method="keyboard_enter",
                     verdict=esc_decision.get("verdict"),
                     page_state=esc_decision.get("page_state"),
-                )
+)
                 if esc_decision.get("verdict") == "PROCEED":
-                    return True
-                await keyboard_action(["Space"], selector=sel)
-                click_progress, click_state, click_reason = await _detect_click_progress_state()
-                if click_progress:
-                    audit(
-                        "click_progress",
-                        method="keyboard_space",
-                        state=click_state,
-                        reason=click_reason,
+                    record_success(
+                        _LAST_QUESTION_TEXT or "",
+                        description or "",
+                        panel=getattr(decision, "panel", None) if 'decision' in dir() else None,
+                        question_type=getattr(decision, "question_type", None) if 'decision' in dir() else None,
                     )
-                    return True
-                dom_change = await dom_verify_change(before_url, before_title)
-                if dom_change.get("changed"):
-                    audit(
-                        "click_progress",
-                        method="keyboard_space",
-                        state="dom_changed",
-                        reason=str(dom_change.get("current_url") or dom_change.get("current_title") or "DOM changed"),
-                    )
-                    return True
-                esc_decision2 = await _vision_gate_inside_escalation(
-                    f"after_keyboard_space_{i}",
-                    f"keyboard Space auf {sel[:60]}",
-                    "Seite hat reagiert",
-                )
-                audit(
-                    "vision_check",
-                    method="keyboard_space",
-                    verdict=esc_decision2.get("verdict"),
-                    page_state=esc_decision2.get("page_state"),
-                )
-                if esc_decision2.get("verdict") == "PROCEED":
                     return True
                 continue
 
@@ -6861,6 +6870,12 @@ async def escalating_click(
                             method="vision_click",
                             state=click_state,
                             reason=click_reason,
+                        )
+                        record_success(
+                            _LAST_QUESTION_TEXT or "",
+                            description or "",
+                            panel=getattr(decision, "panel", None) if 'decision' in dir() else None,
+                            question_type=getattr(decision, "question_type", None) if 'decision' in dir() else None,
                         )
                         return True
                     dom_change = await dom_verify_change(before_url, before_title)
@@ -6960,7 +6975,13 @@ async def escalating_click(
         )
         choice_result = await click_visible_choice_with_text(description)
         if choice_result.get("clicked"):
-            return True
+                        record_success(
+                            _LAST_QUESTION_TEXT or "",
+                            description or "",
+                            panel=getattr(decision, "panel", None) if 'decision' in dir() else None,
+                            question_type=getattr(decision, "question_type", None) if 'decision' in dir() else None,
+                        )
+                        return True
         audit(
             "action",
             message=f"DOM-Fallback: Versuche click_visible_button_with_text('{description[:40]}')",

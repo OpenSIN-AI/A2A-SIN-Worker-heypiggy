@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Answer-History & Anti-Learn Pass, 2026-04-30)
+
+- **`answer_history.py`** — persistenter JSON-Store für erfolgreiche und fehlgeschlagene Antworten.
+- **`answer_router.py`** — berücksichtigt jetzt `failed_options` und vermeidet bekannte Fehlpfade; bei Wiederholung schaltet das Routing auf Vision-Review.
+- **`heypiggy_vision_worker.py`** — schreibt Learn-/Anti-Learn-Ergebnisse in die History zurück.
+- **`session_store.py`** — Session-Cache speichert und restauriert `answer_history` mit.
+- **`tests/test_answer_history.py`**, **`tests/test_answer_router.py`**, **`tests/test_session_store.py`** — Regression-Coverage für Anti-Learn und Persistenz.
+
+### Changed
+
+- **Semver bump to `2.1.0`** — neue Learn-/Anti-Learn-Persistenz ist eine backward-compatible Feature-Erweiterung.
+
 ### Added (Strategy Reset Pass, 2026-04-28)
 
 - **`docs/PLANS/00-NORTHSTAR.md`** — strategische Nordstern-Doku.

@@ -15,4 +15,4 @@ Keep in sync with ``pyproject.toml`` [project].version.
 
 from __future__ import annotations
 
-__version__: str = "2.0.0"
+__version__: str = "2.1.0"

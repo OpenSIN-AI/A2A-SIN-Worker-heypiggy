@@ -34,8 +34,8 @@ Dieser Worker ist die **visuelle Intelligenz** des OpenSIN-Systems. Er verbindet
 > **Ehrliche Bestandsaufnahme (siehe [docs/CEO-AUDIT.md](./docs/CEO-AUDIT.md)).**
 > Der Worker ist eine seriöse, vision-first Automatisierungs-Pipeline mit
 > rund 17 KLOC Python und einer breiten Testbasis. Er ist **nicht** "fertig":
-> die Answer-Loop hängt nicht zu 100% an realen Survey-Pfaden, der Earnings-
-> Pfad auf heypiggy.com ist noch nicht reproduzierbar, und mehrere Closed-
+> die Answer-Loop ist jetzt persistenter dank Answer-History/Anti-Learn,
+> der Earnings-Pfad auf heypiggy.com ist noch nicht reproduzierbar, und mehrere Closed-
 > Issues hatten zum Schliess-Zeitpunkt keinen verifizierten Code-Pfad. Diese
 > Punkte sind in [docs/ISSUE-VERIFICATION.md](./docs/ISSUE-VERIFICATION.md)
 > dokumentiert und in [docs/HARDENING-BACKLOG.md](./docs/HARDENING-BACKLOG.md)
@@ -48,6 +48,7 @@ Dieser Worker ist die **visuelle Intelligenz** des OpenSIN-Systems. Er verbindet
 | **Vision-First** | Jede mutierende Aktion (Klick/Type/Navigate) läuft durch einen Vision-LLM-Gate-Call. Es gibt keine blinde DOM-Selektion. |
 | **Exakte Tab-Bindung** | Der Worker kontrolliert genau einen Tab über die OpenSIN-Bridge. Keine Interferenz mit anderen Tabs. |
 | **Panel-aware Routing** | Detektoren für PureSpectrum / Dynata / Sapio / Cint / Lucid + ein Answer-Router (`answer_router.py`) der pro Step Frage-Typ und Antwort-Strategie als Prompt-Block injiziert. |
+| **Answer-History / Anti-Learn** | Fehloptionen werden persistiert (`answer_history.py`) und beim nächsten Schritt vermieden; wiederholte Fallen schalten auf Vision-Review statt Blind-Repeat. |
 | **Attention/Trap-Detection** | Heuristiken für Attention-Checks, Konsistenz-Traps, Mindestlängen, Quota-/Disqualifikations-Banner. |
 | **Multi-Modal** | Audio-/Video-/Bild-Fragen werden über Media-Router transkribiert/beschrieben und ins Vision-Prompt eingespeist. |
 | **Self-Healing** | Bridge-Retries, Recovery-Pfade und ein Fail-Replay-Recorder; Recovery routet **nicht** auf Cashout/Giftcard (siehe Issue #84). |

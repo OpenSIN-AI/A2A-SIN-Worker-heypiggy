@@ -50,11 +50,12 @@ from __future__ import annotations
 import json
 import os
 import stat
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
+
+from answer_history import load_history as _answer_load_history, save_history as _answer_save_history
 
 # Default-Location fuer den Session-Cache (persistent ueber Runs hinweg).
 # Override via HEYPIGGY_SESSION_CACHE env variable.
@@ -315,6 +316,18 @@ async def dump_session(
 
     existing["saved_at"] = _now_iso()
 
+    # 5b) Answer-History in den Cache aufnehmen
+    try:
+        answer_history = _answer_load_history()
+        if answer_history:
+            existing["answer_history"] = answer_history
+            existing["answer_history_saved_at"] = _now_iso()
+            existing["answer_history_exists"] = True
+        else:
+            existing["answer_history_exists"] = False
+    except Exception as e:
+        audit("session_dump_answer_history_error", error=str(e))
+
     # 5) Atomar schreiben + chmod 600
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -397,7 +410,7 @@ async def restore_session(
 
     domains = data.get("domains", {}) or {}
     entry = domains.get(target_domain)
-    if not entry:
+    if entry is None:
         audit("session_restore_no_entry", target=target_domain)
         return {"restored": False, "reason": "no_entry_for_domain"}
 
@@ -460,6 +473,17 @@ async def restore_session(
                     storage_keys = int(res.get("result") or 0)
             except Exception as e:
                 audit("session_restore_storage_error", error=str(e))
+
+    answer_history_data = data.get("answer_history")
+    if isinstance(answer_history_data, dict) and answer_history_data:
+        try:
+            _answer_save_history(answer_history_data)
+            audit(
+                "session_restore_answer_history_ok",
+                entries=len(answer_history_data),
+            )
+        except Exception as e:
+            audit("session_restore_answer_history_error", error=str(e))
 
     audit(
         "session_restore_ok",

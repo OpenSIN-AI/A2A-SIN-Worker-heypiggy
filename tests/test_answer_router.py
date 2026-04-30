@@ -327,3 +327,42 @@ def test_module_imports_without_worker_globals():
     # Es gibt keine globalen Side-Effects, die Worker-Globals erfordern
     assert hasattr(answer_router, "route_answer")
     assert hasattr(answer_router, "classify_question")
+
+
+class TestAntiLearn:
+    def test_failed_persona_option_forces_ask_vision(self, monkeypatch):
+        monkeypatch.setattr("answer_router.get_failed_options", lambda *_: ["18-24"])
+
+        d = route_answer(
+            question_text="Wie alt sind Sie?",
+            options=["18-24", "25-34", "35-44"],
+            persona_resolution={"confidence": "high", "matched_option": "18-24"},
+        )
+
+        assert d.strategy is Strategy.ASK_VISION
+        assert "18-24" in d.failed_options
+
+    def test_failed_prior_answer_forces_ask_vision(self, monkeypatch):
+        monkeypatch.setattr("answer_router.get_failed_options", lambda *_: ["18-24"])
+
+        d = route_answer(
+            question_text="Wie alt sind Sie?",
+            options=["18-24", "25-34", "35-44"],
+            prior_answer={"answer": "18-24"},
+        )
+
+        assert d.strategy is Strategy.ASK_VISION
+        assert "18-24" in d.failed_options
+
+    def test_prompt_block_mentions_failed_options(self):
+        d = AnswerDecision(
+            strategy=Strategy.ASK_VISION,
+            question_type=QuestionType.SINGLE_CHOICE,
+            confidence=Confidence.LOW,
+            reason="fallback",
+            failed_options=("18-24", "25-34"),
+        )
+
+        text = d.as_prompt_block()
+        assert "18-24" in text
+        assert "25-34" in text

@@ -44,6 +44,7 @@ from panel_overrides import (
     detect_panel_dq,
     detect_quality_trap,
 )
+from answer_history import get_failed_options
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +117,9 @@ class AnswerDecision:
     target_value: str | None = None  # Slider/Numeric/FreeText
     # Welches Panel diese Entscheidung beeinflusst hat (None = kein Panel):
     panel: str | None = None
-    # Empfohlene Mindest-Pause vor Submit (Anti-Speeder, Anti-Bot):
+    # Empfohlene Mindest-Pause vor Submit (Anti-Speeder):
     min_pause_seconds: float = 0.0
+    failed_options: tuple[str, ...] = ()
     # Roher Audit-Footprint:
     audit_tag: str = "answer_router"
 
@@ -138,6 +140,12 @@ class AnswerDecision:
             lines.append(f"PFLICHT-WERT: {self.target_value}")
         if self.min_pause_seconds > 0:
             lines.append(f"VORHER MINDESTENS WARTEN: {self.min_pause_seconds:.1f}s (Anti-Speeder)")
+        if self.failed_options:
+            lines.append(
+                "ANTI-LEARN: Die folgenden Optionen sind bereits fehlgeschlagen "
+                "und MUSSEN vermieden werden: "
+                + ", ".join(f"'{o}'" for o in self.failed_options)
+            )
         lines.append(f"Begruendung: {self.reason}")
         lines.append(f"Confidence: {self.confidence.value}")
         return "\n".join(lines)
@@ -352,6 +360,10 @@ def route_answer(
         panel = detect_panel(url=panel_url, body_text=panel_body)
     panel_name = panel.name if panel else None
 
+    # Anti-Learn: Fehlgeschlagene Optionen fuer diese Frage laden
+    failed_options = list(get_failed_options(question_text) or [])
+    failed_set = set(failed_options)
+
     # Frage-Typ klassifizieren
     qtype = classify_question(
         question_text,
@@ -415,6 +427,19 @@ def route_answer(
     if prior_answer and prior_answer.get("answer"):
         prior = str(prior_answer["answer"])
         best = _best_option_match(prior, options_list) if options_list else None
+        if best and best in failed_set:
+            return AnswerDecision(
+                strategy=Strategy.ASK_VISION,
+                question_type=qtype,
+                confidence=Confidence.LOW,
+                reason=(
+                    f"Prior-Antwort '{best}' war fehlgeschlagen. "
+                    "Vision soll neu entscheiden (Anti-Learn)."
+                ),
+                panel=panel_name,
+                failed_options=tuple(failed_options),
+                min_pause_seconds=_panel_min_pause(panel),
+            )
         return AnswerDecision(
             strategy=Strategy.PRIOR_CONSISTENCY,
             question_type=qtype,
@@ -426,6 +451,7 @@ def route_answer(
                 "Konsistenz-Trap-Schutz: gleiche Antwort wiederverwenden."
             ),
             panel=panel_name,
+            failed_options=tuple(failed_options),
             min_pause_seconds=_panel_min_pause(panel),
         )
 
@@ -434,6 +460,19 @@ def route_answer(
         matched = persona_resolution.get("matched_option")
         raw_value = persona_resolution.get("raw_value")
         topic = persona_resolution.get("topic")
+        if matched and str(matched) in failed_set:
+            return AnswerDecision(
+                strategy=Strategy.ASK_VISION,
+                question_type=qtype,
+                confidence=Confidence.LOW,
+                reason=(
+                    f"Persona-Fact '{matched}' war bereits fehlgeschlagen. "
+                    "Vision soll neu entscheiden (Anti-Learn)."
+                ),
+                panel=panel_name,
+                failed_options=tuple(failed_options),
+                min_pause_seconds=_panel_min_pause(panel),
+            )
         if isinstance(matched, list) and matched:
             return AnswerDecision(
                 strategy=Strategy.PERSONA_FACT,
@@ -511,9 +550,10 @@ def route_answer(
         confidence=Confidence.LOW,
         reason=(
             "Code hat keine sichere Antwort. Vision soll Persona-konform aus den "
-            "sichtbaren Optionen waehlen."
+            "sichtbaren Optionen waehlen (Anti-Learn: {failed_options})."
         ),
         panel=panel_name,
+        failed_options=tuple(failed_options),
         min_pause_seconds=_panel_min_pause(panel),
     )
 
