@@ -1129,3 +1129,9 @@ Erledigt durch Chrome's native `user-data-dir` Funktionalität.
 - Run more surveys (increase HEYPIGGY_MAX_SURVEYS)
 - Test panel-specific surveys (Dynata/PureSpectrum/Cint)
 - Monitor for DQ (disqualification) handling
+
+## Stealth Triade Migration — COMPLETE
+- Alle 5 verbotenen Patterns eliminiert (cua-driver, open -na, AXStaticText, No-Vision, No-unmask)
+- 9/9 Bugs gefixed
+- 49+ obsolete Issues geschlossen
+- Nur #167 (Epic) bleibt als Tracker offen
