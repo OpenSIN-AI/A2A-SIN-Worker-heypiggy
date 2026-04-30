@@ -18,6 +18,7 @@ Panel-Detektoren und Reward-Logik wurden nach dort extrahiert.
 
 - `CGEventPostToPid` und `CGEvent.post` werden von Chrome 148 **ignoriert**
 - **Einzig funktionierender Klick:** `AXUIElementPerformAction(element, kAXPressAction)`
+- **Chrome Accessibility ohne Crash:** VoiceOver 1× starten → "Suppress automatic" in chrome://accessibility deaktivieren → VoiceOver stoppen. AX-Tree bleibt dauerhaft aktiv. Kein `--force-renderer-accessibility` Flag nötig.
 - Chrome braucht `--force-renderer-accessibility` Flag für Web-Elemente im AX-Tree
 - **NIEMALS `--x`/`--y` benutzen** → Nur `--element-index` aus skylight-cli JSON
 - AX-Frame-Koordinaten sind BEREITS absolut (0,0 = Apple-Menü oben links!)
