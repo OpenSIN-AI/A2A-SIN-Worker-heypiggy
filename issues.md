@@ -1,50 +1,32 @@
-# issues.md — All Issues per Repo
+# issues.md — All Issues (Production-Ready State)
 
-## stealth-runner (GREENFIELD — PURE Stealth Triade)
-
+## stealth-runner
 | # | Title | Status |
 |---|-------|--------|
 | #1 | Epic: Stealth Triad Greenfield Build | OPEN (tracker) |
-| #2 | CLI flags usage examples | OPEN |
-| #3 | CLI flags section to AGENTS.md | OPEN |
-| #4 | Update CLI help text | OPEN |
-| #5 | SoM references in Vision prompts | ✅ DONE |
-| #6 | Document merge workflow (CONTRIBUTING.md) | ✅ DONE |
-| #7 | Document panel override logic (sin_survey_core) | ✅ DONE |
-| #8 | Error recovery for survey failures | ✅ DONE |
-| #9 | P0-PRIVACY: Targeted Window Capture | ✅ DONE |
+| #2 | CLI flags usage examples | ✅ CLOSED |
+| #3 | CLI flags section | ✅ CLOSED |
+| #4 | Update CLI help text → skylight-cli | OPEN (P2) |
+| #5 | SoM references in Vision prompts | ✅ IMPLEMENTED |
+| #6 | Merge workflow CONTRIBUTING.md | ✅ CLOSED |
+| #7 | Panel override logic sin_survey_core | ✅ CLOSED |
+| #8 | Error recovery | ✅ IMPLEMENTED |
+| #9 | P0-PRIVACY Targeted Window Capture | ✅ CLOSED |
 
-## A2A-SIN-Worker-heypiggy (ARCHIVED REFERENCE)
-
+## A2A-SIN-Worker-heypiggy
 | # | Title | Status |
 |---|-------|--------|
-| #167 | Integration der Stealth-Triade | OPEN (Epic tracker) |
-| Rest (50+) | CDP/DOM obsolete issues | CLOSED |
+| #167 | Stealth-Triade Epic | OPEN (tracker) |
+| 49+ | CDP/DOM obsolete | CLOSED |
 
-## skylight-cli (STEALTH TRIAD: act)
-
+## skylight-cli
 | # | Title | Status |
 |---|-------|--------|
-| #41 | Epic: Road to v1.0 | OPEN (35 sub-issues) |
-| #76 | Lücken (Gap Analysis) | OPEN (2/6 closed) |
+| #41 | Epic v1.0 (35 sub-issues) | OPEN |
+| #76 | Lücken Analysis | OPEN (2/6 closed) |
 
-## unmask-cli (STEALTH TRIAD: sense)
-
-| # | Title | Status |
-|---|-------|--------|
-| #3 | Medien capabilities | OPEN |
-
-## playstealth-cli (STEALTH TRIAD: think)
-
-| # | Title | Status |
-|---|-------|--------|
-| - | Keine Issues | - |
-
-## SIN-CLIs Gesamt
-
-| Repo | Issues | Open | Closed |
-|------|--------|------|--------|
-| skylight-cli | 36 | 35 | 1 |
-| unmask-cli | 1 | 1 | 0 |
-| stealth-runner | 9 | 5 | 4 |
-| A2A-SIN-Worker-heypiggy | 50+ | 1 | 49+ |
+## unmask-cli | playstealth-cli
+| Repo | Issues |
+|------|--------|
+| unmask-cli | 1 open |
+| playstealth-cli | 0 |
