@@ -19,3 +19,4 @@
 - Jede Aktion ist atomar und in JSON-Trace gespeichert
 - Crash bei Frage 7 = Resume bei Frage 7 (nicht Neustart)
 - Kein DOM-Zugriff, kein MCP-Server, kein Daemon
+✅ PLAYSTEALTH LAUNCH NIE DIREKT NUTZEN
