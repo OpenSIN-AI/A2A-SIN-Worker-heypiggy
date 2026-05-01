@@ -1,0 +1,4 @@
+{"ts": "2026-05-01T06:47:37.640917+00:00", "sid": "0015a165b52c", "evt": "step_start", "plat": "heypiggy", "step": 1, "dur_ms": null, "ok": null, "trap": null, "err": null, "meta": {}}
+{"ts": "2026-05-01T06:47:37.908524+00:00", "sid": "0015a165b52c", "evt": "trap_hit", "plat": "HeyPiggyPlatform", "step": 1, "dur_ms": null, "ok": null, "trap": "honeypot", "err": null, "meta": {"count": 42}}
+{"ts": "2026-05-01T06:54:01.980244+00:00", "sid": "c041c9e3d254", "evt": "step_start", "plat": "heypiggy", "step": 1, "dur_ms": null, "ok": null, "trap": null, "err": null, "meta": {}}
+{"ts": "2026-05-01T06:54:02.255007+00:00", "sid": "c041c9e3d254", "evt": "trap_hit", "plat": "HeyPiggyPlatform", "step": 1, "dur_ms": null, "ok": null, "trap": "honeypot", "err": null, "meta": {"count": 42}}

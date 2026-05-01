@@ -1,2 +1,2 @@
-"""worker.modules — Extracted sections from the monolith (SOTA-002)."""
+"""worker.modules – Extracted from monolith (Phase 3)."""
 from __future__ import annotations
