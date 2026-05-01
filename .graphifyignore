@@ -1,0 +1,10 @@
+# Graphify ignore – patterns excluded from knowledge graph
+node_modules/
+__pycache__/
+.git/
+*.pyc
+.DS_Store
+dist/
+build/
+*.egg-info/
+.graphifyignore

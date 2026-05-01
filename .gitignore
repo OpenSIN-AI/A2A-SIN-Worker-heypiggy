@@ -23,3 +23,9 @@ __pycache__/
 
 # Local secrets - never commit
 .env
+
+# Graphify knowledge graph cache
+# graphify-out/cache/
+
+# Graphify knowledge graph cache
+graphify-out/cache/
