@@ -1,5 +1,12 @@
 # history.md — Development History (Updated 2026-05-01)
 
+## 2026-05-01: Archivierung + Cross-Reference
+
+- **BRAIN.md**: 🚨 Archivierungs-Warnung + Verweis auf aktive Codebase in `stealth-runner`
+- **Klarstellung**: Dieses Repo ist ARCHIVIERT. Alle aktiven Änderungen in `~/dev/stealth-runner/`
+- **Aktives Modell**: `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` (NICHT `meta/llama-3.2-11b-vision-instruct`)
+- **LiveEye v7** mit Motion Detection, Frame-Differencing, Conv3D Optimierung, CRF Auto-Adjust
+
 ## 2026-05-01: SOTA Turnaround
 
 **3 kritische Lücken geschlossen:**
