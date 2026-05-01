@@ -10,7 +10,7 @@
 
 ### 2. Google OAuth Integration
 - **Task 2.1:** Implement OAuth flow with Jeremy Schulze profile
-  - Use **skylight-cli** tools for authentication
+  - Use skylight-cli tools for authentication
 - **Task 2.2:** Session persistence
   - Save/restore cookies via session_store.py
 
