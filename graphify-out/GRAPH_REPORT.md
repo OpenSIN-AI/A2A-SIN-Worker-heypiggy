@@ -115,8 +115,8 @@
 10. `Persona` - 169 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `router()` --calls--> `MediaRouter`  [INFERRED]
-  tests/test_media_router.py → media_router.py
+- `MediaRouter` --calls--> `router()`  [INFERRED]
+  media_router.py → tests/test_media_router.py
 - `OpenSIN Global Brain policy helpers.  WHY: Agents must never leave env/secret st` --uses--> `GlobalBrainClient`  [INFERRED]
   global_brain_policy.py → global_brain_client.py
 - `Extended metadata for secret rotation tracking.      WHY: Secrets need lifecycle` --uses--> `GlobalBrainClient`  [INFERRED]

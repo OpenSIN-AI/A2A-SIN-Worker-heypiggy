@@ -2,22 +2,29 @@
 
 ## WENN DU NUR EINEN KLICK TESTEN WILLST
 ```bash
-python3 runner/safe_click.py $(pgrep -f "Google Chrome" | head -1)
+playstealth launch --url 'https://heypiggy.com/?page=dashboard'
+# PID aus Output merken
+skylight-cli click --pid <PID> --element-index <N>
 ```
-Das holt ALLE Elemente von skylight-cli, nimmt die AX-Frame-Koordinaten,
-und klickt den ersten Web-Button per `--element-index`.
 
 ## WENN DU DEN GANZEN RUNNER STARTEN WILLST
 ```bash
-python3 main.py "https://heypiggy.com/?page=dashboard"
+python3 runner/step.py "https://heypiggy.com/?page=dashboard"
 ```
 
 ## WAS DU NIEMALS TUST
-- ❌ --x oder --y Koordinaten raten (das Apple-Menü ist bei 0,0!)
+- ❌ `pgrep Chrome` – Nutzer-Chrome stören
+- ❌ `--x` oder `--y` Koordinaten raten (Apple-Menü ist bei 0,0!)
 - ❌ Fenster-Position + Element-Position addieren (AX-Frame ist ABSOLUT)
-- ❌ Auf (500,600) klicken weil "das ist die Mitte" (ist es nicht)
-- ❌ Irgendwas mit "Fenster-Mitte" berechnen
+- ❌ webauto-nodriver – BANNED
+- ❌ Ohne Primer klicken
 
-## WARUM DAS APPLE-MENÜ GEKLICKT WURDE
-Bildschirm-Koordinaten: (0,0) = oben links = Apple-Menü. Nie raten.
-NUR `--element-index` benutzen.
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
