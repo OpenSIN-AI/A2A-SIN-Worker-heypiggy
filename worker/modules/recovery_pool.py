@@ -1,4 +1,4 @@
-"""recovery_pool.py – Extracted from heypiggy_vision_worker.py."""
-from __future__ import annotations
-def placeholder() -> bool:
-    return True
+"""Recovery-Strategien."""
+RECOVERY_STRATEGIES = ("recapture", "re-vision", "wait-retry", "scroll-retry", "relaunch", "abort")
+def get_strategy(attempt: int) -> str:
+    return RECOVERY_STRATEGIES[attempt] if attempt < len(RECOVERY_STRATEGIES) else "abort"
