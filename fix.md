@@ -1,4 +1,14 @@
-# fix.md — 9 Bugs gefixed (Production-Ready)
+# fix.md — 9+ Bugs gefixed, 3 SOTA-Lücken geschlossen (2026-05-01)
+
+## SOTA-Fixes (Mai 2026)
+
+| # | Problem | Lösung | Commit |
+|---|---------|--------|--------|
+| 10 | Zero Cross-Repo Integration | Unmask/ScreenFollow Drivers + DOM_PRESCAN State | `b1eee1e` |
+| 11 | Vision-Kosten > Auszahlung | Vision-free Fast Path via Answer-Router Confidence Gate | `b1eee1e` + `35a76f0` |
+| 12 | Stealth-Claims unbewiesen | CreepJS CI Gate bei 80% | `a8865ba` |
+
+## Historische Fixes (April 2026)
 
 | # | Bug | Symptom | Fix | Commit |
 |---|-----|---------|-----|--------|
