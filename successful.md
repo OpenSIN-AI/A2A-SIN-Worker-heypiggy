@@ -81,3 +81,10 @@ Keine Verwechslung mit `/doctor` mehr.
 | Dashboard nach Login | ❌ Noch nicht |
 | Umfrage finden | ❌ Noch nicht |
 | EUR verdienen | ❌ Noch nicht |
+
+## 2026-05-01: ERSTES ERFOLGREICHES STATE-MACHINE-RUN MIT EXISTIERENDEM CHROME
+Die State Machine hat 30+ Screenshots via skylight-cli gemacht, DOM prescan lief (confidence 0.70),
+Vision-FREE-Path aktiviert (kein teurer Vision-Call!), und Klicks wurden ausgeführt.
+Der einzige Grund warum keine EUR verdient wurden: immer dasselbe Element [1] geklickt.
+SEOFS
+git add -A && git commit -m "docs: fix.md + successful.md updated — State Machine läuft mit existierendem Chrome" && git push origin HEAD:main && echo "✅ docs updated"

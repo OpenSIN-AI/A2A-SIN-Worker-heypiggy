@@ -21,3 +21,10 @@
 | 7 | Lesezeichen-Klicks | Chrome-UI geklickt | validate_click_coordinates() | 987e862 |
 | 8 | AX-Tree-Kollaps | 0 Elemente | _AXObserverAddNotificationAndCheckRemote | 2ea1ee6 |
 | 9 | Canvas UIs | 70-80% Präzision | VNRecognizeTextRequest (OCR) | f7b1f31 |
+
+## 2026-05-01: State Machine läuft mit existierendem Chrome
+- Playwright-launch erzeugt kaputte Chrome-Instanz (SingletonLock, on-screen-window)
+- Lösung: Chrome separat mit User/Open starten, PID an State Machine übergeben
+- `r.pid = CHROME_PID; r.executor.pid = CHROME_PID` setzen
+- State Machine läuft dann direkt ab CAPTURE (nicht LAUNCH)
+- Die zwei Instanzen via Playwright starben immer mit "No on-screen window"
