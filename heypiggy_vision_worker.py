@@ -1859,6 +1859,53 @@ def _decision_from_ui_assessment(assessment, facts: UiFacts | None = None) -> di
     return None
 
 
+def _try_answer_router_fast_path(ui_facts: UiFacts, ui_assessment) -> dict[str, object] | None:
+    is_survey = ui_assessment.state in {
+        UiSurfaceState.EXTERNAL_SURVEY_QUESTION,
+        UiSurfaceState.DASHBOARD_MODAL_SURVEY,
+    }
+    if not is_survey:
+        return None
+
+    question_text = ui_facts.question_text.strip()
+    options = list(ui_facts.primary_buttons) if ui_facts.primary_buttons else []
+    if not question_text or not options:
+        return None
+
+    try:
+        panel = detect_panel(url=ui_facts.url, body_text=ui_facts.body_text)
+        decision = route_answer(
+            question_text=question_text,
+            options=options,
+            panel=panel,
+            panel_url=ui_facts.url,
+            panel_body=ui_facts.body_text,
+            dom_hints={
+                "has_radio": bool(ui_facts.has_modal_overlay),
+                "has_textarea": bool(ui_facts.question_text and len(ui_facts.question_text) > 80),
+            },
+        )
+    except Exception:
+        return None
+
+    confidence_ok = (
+        decision.confidence == Confidence.HIGH
+        and decision.strategy != Strategy.ASK_VISION
+        and decision.target_option
+    )
+    if confidence_ok:
+        return {
+            "verdict": "PROCEED",
+            "page_state": "survey_active",
+            "reason": f"Vision-free router: {decision.reason}",
+            "progress": True,
+            "next_action": "click_element",
+            "next_params": {"selector": decision.target_option},
+            "_router_confidence": confidence_ok,
+        }
+    return None
+
+
 def _merge_ui_assessment_into_decision(decision: dict[str, object], assessment) -> dict[str, object]:
     """Correct obvious state mismatches between vision output and deterministic UI facts."""
     merged = dict(decision)
@@ -8480,6 +8527,12 @@ async def main():
         ui_assessment = classify_ui_state(ui_facts)
         deterministic_decision = _decision_from_ui_assessment(ui_assessment, ui_facts)
 
+        # ---- VISION-FREE FAST PATH ----
+        # WHY: Wenn der DOM eine klare Frage + Optionen zeigt und der
+        # Answer-Router HIGH confidence hat → Vision-LLM überspringen.
+        # Spart $0.03/Call und ~3s Latenz pro Step.
+        router_fast = _try_answer_router_fast_path(ui_facts, ui_assessment)
+
         # ---- VISION CHECK ----
         if deterministic_decision is not None:
             decision = deterministic_decision
@@ -8489,6 +8542,15 @@ async def main():
                 state=ui_assessment.state.value,
                 action=decision.get("next_action", "none"),
                 reason=ui_assessment.reason,
+            )
+        elif router_fast is not None:
+            decision = router_fast
+            audit(
+                "vision_free_decision",
+                step=current_step,
+                state=ui_assessment.state.value,
+                action=decision.get("next_action", "none"),
+                reason=decision.get("reason", ""),
             )
         else:
             decision = await ask_vision(img_path, action_desc, expected, current_step)
