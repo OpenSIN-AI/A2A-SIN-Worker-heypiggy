@@ -21,7 +21,7 @@ Find center pixel coords of first survey button. Answer ONLY: X=NUM Y=NUM
 
 **Modelle (Stand 28.4.2026):**
 - ✅ `meta/llama-3.2-11b-vision-instruct` — FREE, ~1s, 11B
-- ✅ `meta/llama-3.2-90b-vision-instruct` — FREE, langsamer, 90B
+- ✅ `meta/**nvidia/nemotron-3-nano-omni-30b-a3b-reasoning**` — FREE, langsamer, 90B
 - ❌ Phi-3.5-vision — EOL 15.4.2026
 - ❌ Mistral Small 3.1 — EOL 15.4.2026
 - ❌ Phi-4-multimodal — DEGRADED

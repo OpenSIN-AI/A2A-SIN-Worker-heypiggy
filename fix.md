@@ -12,7 +12,7 @@
 
 | # | Bug | Symptom | Fix | Commit |
 |---|-----|---------|-----|--------|
-| 1 | cua-driver in runner | Agent nutzt altes Tool | Alle refs entfernt, skylight-cli only | efd363f |
+| 1 | **skylight-cli** in runner | Agent nutzt altes Tool | Alle refs entfernt, skylight-cli only | efd363f |
 | 2 | open -na Chrome | Kein Stealth-Browser | playstealth-cli launch in StateMachine | efd363f |
 | 3 | AXStaticText click | Klick löst nichts aus | Prompt verbietet, nur Button/Link/RadioButton | efd363f |
 | 4 | Kein Vision vor Klick | Blindes Raten | VisionClient.get_action() vor execute | efd363f |

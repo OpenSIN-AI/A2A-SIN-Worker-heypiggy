@@ -13,10 +13,10 @@ python3 runner/step.py "https://heypiggy.com/?page=dashboard"
 ```
 
 ## WAS DU NIEMALS TUST
-- ❌ `pgrep Chrome` – Nutzer-Chrome stören
+- ❌ `**playstealth launch (isolierte PID)** stören
 - ❌ `--x` oder `--y` Koordinaten raten (Apple-Menü ist bei 0,0!)
 - ❌ Fenster-Position + Element-Position addieren (AX-Frame ist ABSOLUT)
-- ❌ webauto-nodriver – BANNED
+- ❌ **skylight-cli** – BANNED
 - ❌ Ohne Primer klicken
 
 ## graphify

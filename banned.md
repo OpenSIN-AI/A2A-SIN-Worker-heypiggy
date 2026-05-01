@@ -12,7 +12,7 @@
 1. **skylight-cli** — Screenshot via Accessibility API, AXPress (Accessibility API)
 2. **playstealth-cli** — Browser-Start mit Fingerprint-Schutz
 3. **unmask-cli** — Stealth-Verification und Bot-Detection
-4. **cua-driver** — Fallback-MVP (gleiche SkyLight-API)
+4. ****skylight-cli**** — Fallback-MVP (gleiche SkyLight-API)
 5. **Cloudflare Llama 4 Scout** — Vision-LLM via Workers AI
 
 ## Architektur-Prinzipien

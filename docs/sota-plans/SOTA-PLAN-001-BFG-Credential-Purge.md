@@ -23,7 +23,7 @@
 
 **Weaknesses:**
 - `.env` file is `git ls-files` confirmed tracked
-- Contains: `HEYPIGGY_PASSWORD="ZOE.jerry2024"`, `NVIDIA_API_KEY="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"`
+- Contains: `HEYPIGGY_PASSWORD="ZOE.jerry2024"`, `NVIDIA_API_KEY="NVIDIA_API_KEY (ENTFERNT – nur env var)"`
 - Multiple commits in history contain this file
 - Remote (`github.com/OpenSIN-AI/A2A-SIN-Worker-heypiggy`) has the same history
 

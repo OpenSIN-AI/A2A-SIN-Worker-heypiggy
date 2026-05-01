@@ -1,7 +1,7 @@
 # Graph Report - A2A-SIN-Worker-heypiggy  (2026-05-01)
 
 ## Corpus Check
-- 152 files · ~172,257 words
+- 152 files · ~175,360 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary

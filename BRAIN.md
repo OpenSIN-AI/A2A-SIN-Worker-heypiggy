@@ -32,7 +32,7 @@ Panel-Detektoren und Reward-Logik wurden nach dort extrahiert.
 ## NVIDIA Vision Model
 
 **Mistral hat KEIN Vision-Modell** (Text-only). Vision-fähig über NVIDIA:
-- ⭐ `meta/llama-3.2-90b-vision-instruct` (BESTE)
+- ⭐ `meta/**nvidia/nemotron-3-nano-omni-30b-a3b-reasoning**` (BESTE)
 - `meta/llama-3.2-11b-vision-instruct` (schneller)
 - `nvidia/neva-22b` (NVIDIA-eigen)
 - API: `https://integrate.api.nvidia.com/v1/chat/completions` mit `nvapi-...` Key
@@ -50,7 +50,7 @@ Wenn der User gerade arbeitet, zerstörst du seine Session.
 cp -r ~/Library/Application\ Support/Google/Chrome/Default /tmp/heypiggy-bot
 
 # 2. Bot-Chrome starten (SEPARATES Fenster, EIGENES Profil)
-open -na "Google Chrome" --args --user-data-dir=/tmp/heypiggy-bot \
+**playstealth launch** --args --user-data-dir=/tmp/heypiggy-bot \
   --new-window "https://www.heypiggy.com/?page=dashboard"
 
 # 3. Bot-Fenster auf rechte Bildhälfte
@@ -303,7 +303,7 @@ screencapture -x /tmp/step.png && sips -Z 512 /tmp/step.png --out /tmp/step_s.pn
 
 **Verfügbare FREE Vision-Modelle (28.4.2026):**
 - ✅ `meta/llama-3.2-11b-vision-instruct` — ~1s, keine Safety-Filter, ungenaue Koordinaten
-- ✅ `meta/llama-3.2-90b-vision-instruct` — langsamer (~3-5s), PRÄZISE Koordinaten
+- ✅ `meta/**nvidia/nemotron-3-nano-omni-30b-a3b-reasoning**` — langsamer (~3-5s), PRÄZISE Koordinaten
 - ❌ Alle Phi/Mistral-Vision — EOL 15.4.2026
 
 **⚠️ Wichtig 90B Prompt:** KEINE roboterhaften System-Prompts ("NUR Zahlen! NICHTS anderes!")
@@ -363,7 +363,7 @@ Puter bietet einen OpenAI-kompatiblen Endpoint. Keine neue SDK nötig — einfac
 **Model:** `z-ai/glm-5v-turbo` — NATIV trainiert für GUI-Grounding (Bounding Boxes aus Screenshots)
 
 ```python
-from openai import OpenAI
+**httpx an NVIDIA NIM** OpenAI
 client = OpenAI(
     base_url="https://api.puter.com/puterai/openai/v1/",
     api_key="DEIN_PUTER_TOKEN"
@@ -433,7 +433,7 @@ Keine neue SDK nötig — `base_url` tauschen, eigener Auth-Token als `api_key`.
 **→ Puter Vision unzuverlässig für reale Screenshots. NVIDIA 90B bleibt primär.**
 
 ```python
-from openai import OpenAI
+**httpx an NVIDIA NIM** OpenAI
 client = OpenAI(
     base_url="https://api.puter.com/puterai/openai/v1/",
     api_key="DEIN_PUTER_TOKEN"
@@ -500,7 +500,7 @@ coords = json.loads(response.choices[0].message.content)
 **Alle getesteten Modelle (29.4.2026):**
 - 🏆 `@cf/meta/llama-4-scout-17b-16e-instruct` — **Cloudflare Workers AI** ✅ Vision + JSON nativ
 - ✅ `mistralai/mistral-large-3-675b-instruct-2512` — **NVIDIA NIM** Vision + JSON (Markdown)
-- ✅ `meta/llama-3.2-90b-vision-instruct` — **NVIDIA NIM** Vision (JSON-enforced)
+- ✅ `meta/**nvidia/nemotron-3-nano-omni-30b-a3b-reasoning**` — **NVIDIA NIM** Vision (JSON-enforced)
 - ✅ `meta/llama-3.2-11b-vision-instruct` — **NVIDIA NIM** Vision (schnell, ungenau)
 - ❌ Cloudflare AI Gateway — braucht Provider-Keys
 - ❌ Puter SDK (Node.js) — WebSocket-Bug
@@ -625,7 +625,7 @@ Dieser Bug erklärt ALLE Fehlklicks der letzten Stunden.
 **Der erste Survey-Klick via MCP hat funktioniert!**
 
 **Exakt so wurde es gemacht:**
-1. Bot-Chrome gestartet: `open -na "Google Chrome" --args --user-data-dir=/tmp/heypiggy-bot --new-window "https://www.heypiggy.com/?page=dashboard"`
+1. Bot-Chrome gestartet: `**playstealth launch** --args --user-data-dir=/tmp/heypiggy-bot --new-window "https://www.heypiggy.com/?page=dashboard"`
 2. MCP `left_click [1400,400]` → aktiviert Bot-Fenster
 3. MCP `key cmd+l` → `type URL` → `key enter` → Navigation NUR via MCP
 4. MCP `get_screenshot` → 1464×823 PNG
@@ -640,34 +640,34 @@ Dieser Bug erklärt ALLE Fehlklicks der letzten Stunden.
 
 ---
 
-# 🆕 UPDATE 29.4.2026 — cua-driver + OCR-First Grid + SoM
+# 🆕 UPDATE 29.4.2026 — **skylight-cli** + OCR-First Grid + SoM
 
-## 🏆 WICHTIGSTE NEUERUNG: cua-driver ersetzt computer-use-mcp
+## 🏆 WICHTIGSTE NEUERUNG: **skylight-cli** ersetzt computer-use-mcp
 
 **`computer-use-mcp` (nut.js via SIN-CLIs Fork) ist DEPRECATED.**
 
-**Ersetzt durch:** `cua-driver` (trycua/cua v0.0.13)
-**Warum?** Siehe Vergleich unten — cua-driver löst den Cursor-Kampf.
+**Ersetzt durch:** `**skylight-cli**` (trycua/cua v0.0.13)
+**Warum?** Siehe Vergleich unten — **skylight-cli** löst den Cursor-Kampf.
 
 ### Grund: computer-use-mcp bewegt den PHYSISCHEN CURSOR
 
 `computer-use-mcp` nutzt `nut.js`, das intern `CGEventPost(kCGHIDEventTap, ...)` aufruft. Das bewegt IMMER den einen System-Cursor. Egal ob Bot-Fenster fokussiert, osascript-Fenster-Wechsel, nichts. Der Cursor springt zu den Klick-Koordinaten → User wird gestört.
 
-### cua-driver: Klick DIREKT an PID, KEIN Cursor-Sprung
+### **skylight-cli**: Klick DIREKT an PID, KEIN Cursor-Sprung
 
-cua-driver nutzt `CGEventPostToPid` (CoreGraphics) plus SkyLight-Framework intern. Die Klick-Events gehen DIREKT in die Event-Queue des Ziel-Prozesses (Chrome PID). Der physische Cursor wird NIEMALS bewegt.
+**skylight-cli** nutzt `CGEventPostToPid` (CoreGraphics) plus SkyLight-Framework intern. Die Klick-Events gehen DIREKT in die Event-Queue des Ziel-Prozesses (Chrome PID). Der physische Cursor wird NIEMALS bewegt.
 
 **macOS Requirement:** Accessibility (Bedienungshilfen) Permission + SIP disabled (via Recovery Mode `csrutil disable`). Auf macOS 26.3.1 sind beide Permissions automatisch granted nach Installation.
 
-### Warum nicht cua-driver schon früher?
+### Warum nicht **skylight-cli** schon früher?
 
 - `CGEventPostToPid` via Python ctypes direkt schlug fehl (TCC-Permission-Problem in der Python-Laufzeit)
-- cua-driver installiert ein privilegiertes Helper-Tool (`SMJobBless` → LaunchDaemon als root) das TCC-Umgehung hat
+- **skylight-cli** installiert ein privilegiertes Helper-Tool (`SMJobBless` → LaunchDaemon als root) das TCC-Umgehung hat
 - Erst mit `csrutil disable` (User hatte Recovery-Mode) funktioniert es sauber
 
-## Vergleich: ALT (computer-use-mcp) vs NEU (cua-driver)
+## Vergleich: ALT (computer-use-mcp) vs NEU (**skylight-cli**)
 
-| Feature | computer-use-mcp (DEPRECATED) | cua-driver (AKTIV) |
+| Feature | computer-use-mcp (DEPRECATED) | **skylight-cli** (AKTIV) |
 |---------|-------------------------------|---------------------|
 | Maus-Cursor | 🚫 Springt zu Klickposition | ✅ Bleibt unverändert |
 | Fenster-Fokus | Muss Bot-Fenster aktivieren | Kein Fokus nötig |
@@ -675,46 +675,46 @@ cua-driver nutzt `CGEventPostToPid` (CoreGraphics) plus SkyLight-Framework inter
 | Screenshot | 1464×823 (muss skaliert werden) | 1920×1080 (NATIVE Auflösung) |
 | Skalierung | ×1.31 nötig (Bug-Quelle) | KEINE Skalierung |
 | Type/Key | CGEvent global | CGEventPostToPid direkt |
-| Installation | `npm -y computer-use-mcp` | `brew install cua-driver` |
-| API | MCP stdio (json-rpc) | CLI `cua-driver call <tool>` |
+| Installation | `npm -y computer-use-mcp` | `brew install **skylight-cli**` |
+| API | MCP stdio (json-rpc) | CLI `**skylight-cli** call <tool>` |
 | Permissions | Keine nötig (CGEventPost) | Accessibility + SIP disabled |
 | macOS Risiko | Kein Risiko | macOS-Update könnte brechen |
 
-## cua-driver Kommandos (Referenz)
+## **skylight-cli** Kommandos (Referenz)
 
 ```bash
 # Chrome PID finden
-pgrep -x 'Google Chrome'  # → 2253
+**playstealth launch (isolierte PID)**'  # → 2253
 
 # Screenshot (1920×1080 NATIV)
-cua-driver call screenshot
+**skylight-cli** call screenshot
 
 # Klick an PID (KEIN CURSOR-SPRUNG!)
-cua-driver call click '{"pid":2253,"x":800,"y":500}'
+**skylight-cli** call click '{"pid":2253,"x":800,"y":500}'
 
 # Type Text an PID
-cua-driver call type_text '{"pid":2253,"text":"Hello"}'
+**skylight-cli** call type_text '{"pid":2253,"text":"Hello"}'
 
 # Taste drucken
-cua-driver call press_key '{"pid":2253,"key":"enter"}'
+**skylight-cli** call press_key '{"pid":2253,"key":"enter"}'
 
 # Scrollen
-cua-driver call scroll '{"pid":2253,"direction":"down"}'
+**skylight-cli** call scroll '{"pid":2253,"direction":"down"}'
 
 # JS ausführen
-cua-driver call page '{"pid":2253,"action":"execute_javascript","code":"window.location.href"}'
+**skylight-cli** call page '{"pid":2253,"action":"execute_javascript","code":"window.location.href"}'
 
 # Accessibility-Tree
-cua-driver call get_window_state '{"pid":2253}'
+**skylight-cli** call get_window_state '{"pid":2253}'
 
 # Apps listen
-cua-driver call list_apps
+**skylight-cli** call list_apps
 
 # Cursor-Position
-cua-driver call get_cursor_position
+**skylight-cli** call get_cursor_position
 
 # Permission-Status
-cua-driver call check_permissions
+**skylight-cli** call check_permissions
 ```
 
 ## OCR-First Grid + Set-of-Mark (SoM) — SOTA Visual Prompting
@@ -753,7 +753,7 @@ Interaktive Elemente (Buttons, Links, Inputs) werden automatisch via Browser-JS 
 ```
 mcp_survey_runner.py (~330 Zeilen)
 ├── draw_grid(image, som_elements)     → OCR-Grid + SoM Overlay
-├── cua_call(tool, args)               → cua-driver CLI Wrapper
+├── cua_call(tool, args)               → **skylight-cli** CLI Wrapper
 ├── cua_screenshot()                   → 1920×1080 Screenshot
 ├── cua_click(x, y, pid)               → Klick OHNE Cursor-Sprung
 ├── cua_type_text(text, pid)           → Text an PID
@@ -768,7 +768,7 @@ mcp_survey_runner.py (~330 Zeilen)
 └── SurveyRunner.run()                 → Haupt-Survey-Loop (synchron)
 ```
 
-**Wichtig:** Der SurveyRunner ist SYNCHRON (kein asyncio). cua-driver CLI-Aufrufe sind blocking, aber schnell (~100ms pro Klick, ~500ms pro Screenshot). Kein Parallel-Overhead nötig.
+**Wichtig:** Der SurveyRunner ist SYNCHRON (kein asyncio). **skylight-cli** CLI-Aufrufe sind blocking, aber schnell (~100ms pro Klick, ~500ms pro Screenshot). Kein Parallel-Overhead nötig.
 
 ## DEPRECATED-Sektionen (nicht mehr verwenden)
 
@@ -776,9 +776,9 @@ Die folgenden Sektionen in dieser BRAIN.md sind HISTORISCH und werden durch neue
 
 ### 🔴 DEPRECATED: Sektion 1 (Zeilen 9-121) — computer-use-mcp + Bridge
 
-**Ersetzt durch:** cua-driver (cua_call, cua_click, cua_screenshot in `mcp_survey_runner.py`)
+**Ersetzt durch:** **skylight-cli** (cua_call, cua_click, cua_screenshot in `mcp_survey_runner.py`)
 **Datum:** 29.4.2026
-**Begründung:** computer-use-mcp bewegt den physischen Cursor (CGEventPost → HID Tap). cua-driver nutzt CGEventPostToPid → Klick direkt an PID → kein Cursor-Sprung. Bridge war ohnehin kaputt (4 kritische Bugs).
+**Begründung:** computer-use-mcp bewegt den physischen Cursor (CGEventPost → HID Tap). **skylight-cli** nutzt CGEventPostToPid → Klick direkt an PID → kein Cursor-Sprung. Bridge war ohnehin kaputt (4 kritische Bugs).
 
 ### 🔴 DEPRECATED: Sektion 2 (Zeilen 124-139) — Cashout-Misclick Defense
 
@@ -797,13 +797,13 @@ Die folgenden Sektionen in dieser BRAIN.md sind HISTORISCH und werden durch neue
 
 ### 🔴 DEPRECATED: Sektion 9 (Zeilen 239-250) — Competitive Landscape
 
-**Status:** Teilweise veraltet. Patchright/Playwright-Stealth sind nicht mehr relevant für cua-driver-Ansatz (AX-RPC statt Playwright).
+**Status:** Teilweise veraltet. Patchright/Playwright-Stealth sind nicht mehr relevant für **skylight-cli**-Ansatz (AX-RPC statt Playwright).
 
 ### 🔴 DEPRECATED: Sektion 10 (Zeilen 254-320) — NVIDIA Vision API + Koordinaten-Skalierung
 
 **Ersetzt durch:** OCR-First Grid + SoM (kein NVIDIA nötig für Grid-Koordinaten — Llama 4 Scout liest Text ab)
 **Datum:** 29.4.2026
-**Begründung:** Koordinaten-Skalierung (1.31×) war eine Krücke für computer-use-mcp. cua-driver liefert 1920×1080 NATIVE Screenshots → KEINE Skalierung nötig. Zudem liest Llama 4 Scout Grid-Text mit Faktor 100× besser als Pixel-Koordinaten zu raten.
+**Begründung:** Koordinaten-Skalierung (1.31×) war eine Krücke für computer-use-mcp. **skylight-cli** liefert 1920×1080 NATIVE Screenshots → KEINE Skalierung nötig. Zudem liest Llama 4 Scout Grid-Text mit Faktor 100× besser als Pixel-Koordinaten zu raten.
 
 ---
 
@@ -822,9 +822,9 @@ Die folgenden Sektionen in dieser BRAIN.md sind HISTORISCH und werden durch neue
 |------------|--------|
 | **Vision funktioniert** | Mistral 675B via NVIDIA antwortet `COORD=760,600` — Grid-Text wird gelesen |
 | **Grid-Präzision bestätigt** | Vision liest Grid-Koordinaten korrekt (kein ±50px-Raten) |
-| **cua-driver click OK** | `click {"pid":2253, "window_id":7773, "x":760, "y":600}` → returned "posted" |
+| ****skylight-cli** click OK** | `click {"pid":2253, "window_id":7773, "x":760, "y":600}` → returned "posted" |
 | **Screenshot NATIV** | 1920×1080 (KEIN Skalierungs-Bug ×1.31 wie bei computer-use-mcp) |
-| **window_id PFICHT** | cua-driver `page`, `get_window_state` brauchen `window_id` — ohne kommt "Missing required field" |
+| **window_id PFICHT** | **skylight-cli** `page`, `get_window_state` brauchen `window_id` — ohne kommt "Missing required field" |
 
 ### CF_TOKEN fehlt → NVIDIA Fallback genutzt
 
@@ -833,7 +833,7 @@ Die folgenden Sektionen in dieser BRAIN.md sind HISTORISCH und werden durch neue
 - Antwortzeit: ~15s (675B ist groß, aber FREE)
 - **CF_TOKEN muss gesetzt werden für Llama 4 Scout (300 req/min FREE, schneller)**
 
-### Korrekte cua-driver API (29.4.2026)
+### Korrekte **skylight-cli** API (29.4.2026)
 
 Alle `page`-Aufrufe brauchen **beide** `pid` UND `window_id`:
 
@@ -847,15 +847,15 @@ cua_call('page', {"pid": 2253, "action": "execute_javascript", "code": js})
 
 **window_id finden via `list_windows`:**
 ```bash
-cua-driver call list_windows | grep -i heypiggy
+**skylight-cli** call list_windows | grep -i heypiggy
 # → "Google Chrome (pid 2253) 'HeyPiggy…' [window_id: 7773]"
 ```
 
 ### Screenshot korrekt via --image-out (nicht JSON)
 
-cua-driver gibt native MCP image blocks (kein JSON mit base64). Der offizielle Weg:
+**skylight-cli** gibt native MCP image blocks (kein JSON mit base64). Der offizielle Weg:
 ```bash
-cua-driver call screenshot --image-out /tmp/shot.png
+**skylight-cli** call screenshot --image-out /tmp/shot.png
 ```
 
 Alternative: `--raw` gibt JSON mit `content[].type == "image"` und base64 `data`.
@@ -878,9 +878,9 @@ Alternative: `--raw` gibt JSON mit `content[].type == "image"` und base64 `data`
 
 **ALT:** `cua_call('screenshot')` → JSON base64 aus `--raw` → produzierte Log-Spam ("On-screen windows:..."), bei jedem Aufruf ca. 1.5KB Log. Im Loop (10 Screenshots) = 15KB nutzloser Output.
 
-**NEU:** `subprocess.run(['cua-driver', 'call', 'screenshot', '--image-out', '/tmp/_cs.png'], capture_output=True)` → PNG direkt auf Disk → `open('/tmp/_cs.png','rb').read()`. Kein Log, kein unnötiges JSON-Parsing.
+**NEU:** `subprocess.run(['**skylight-cli**', 'call', 'screenshot', '--image-out', '/tmp/_cs.png'], capture_output=True)` → PNG direkt auf Disk → `open('/tmp/_cs.png','rb').read()`. Kein Log, kein unnötiges JSON-Parsing.
 
-**Begründung:** cua-driver gibt native MCP image blocks (kein JSON). `--image-out` ist der offizielle Weg laut cua-driver Doku. Vorher haben wir `--raw` genutzt und das JSON selbst geparst — das hat den `content[].text` mit "On-screen windows:"-Spam mitgeliefert.
+**Begründung:** **skylight-cli** gibt native MCP image blocks (kein JSON). `--image-out` ist der offizielle Weg laut **skylight-cli** Doku. Vorher haben wir `--raw` genutzt und das JSON selbst geparst — das hat den `content[].text` mit "On-screen windows:"-Spam mitgeliefert.
 
 **Nebenwirkung behoben:** Im alten Code wurde `get_screenshot_with_grid()` aufgerufen das intern `cua_extract_som_elements()` aufrief das wiederum `cua_js()` aufrief — 3x Screenshot pro Loop. Jetzt: `cua_screenshot_bytes()` → 1x Screenshot, kein JS.
 
@@ -982,11 +982,11 @@ elif state2 in ('screener', 'question', ...):
 
 ### Kein JavaScript verfügbar (ohne `enable_javascript_apple_events`)
 
-cua-driver `page.execute_javascript` braucht `"Allow JavaScript from Apple Events"` in Chrome. Das ist EINMALIG via `cua-driver call page '{"pid":...,"window_id":...,"action":"enable_javascript_apple_events","bundle_id":"com.google.Chrome","user_has_confirmed_enabling":true}'` aktivierbar — restartet Chrome kurz.
+**skylight-cli** `page.execute_javascript` braucht `"Allow JavaScript from Apple Events"` in Chrome. Das ist EINMALIG via `**skylight-cli** call page '{"pid":...,"window_id":...,"action":"enable_javascript_apple_events","bundle_id":"com.google.Chrome","user_has_confirmed_enabling":true}'` aktivierbar — restartet Chrome kurz.
 
 **Solange nicht aktiviert:** `cua_js()` gibts Fehler, `cua_extract_som_elements()` produziert 0 Elemente, `get_screenshot_with_grid()` ohne SoM. Der Survey-Loop läuft TROTZDEM — Grid + Vision + Click funktionieren ohne JS.
 
-**Wenn aktiviert:** SoM (Set-of-Mark Boxen) und URL-Verifikation per JS sind möglich. cua-driver empfiehlt dies für bessere Debugging-Fähigkeiten, aber es ist nicht kritisch.
+**Wenn aktiviert:** SoM (Set-of-Mark Boxen) und URL-Verifikation per JS sind möglich. **skylight-cli** empfiehlt dies für bessere Debugging-Fähigkeiten, aber es ist nicht kritisch.
 
 ### Bot-Chrome vs Main-Chrome strikt trennen
 
@@ -1009,9 +1009,9 @@ Die State-Detection nutzt `ask_vision_text()` das KEIN Koordinaten-Parsing brauc
 
 ## Noch zu tun (29.4.2026)
 
-- [x] **cua-driver installieren** ✅
+- [x] ****skylight-cli** installieren** ✅
 - [x] **Screenshot + OCR-Grid + SoM Overlay** ✅
-- [x] **Vision-Klick (Mistral 675B → COORD → cua-driver click)** ✅ — Cursor frei!
+- [x] **Vision-Klick (Mistral 675B → COORD → **skylight-cli** click)** ✅ — Cursor frei!
 - [x] **cua_screenshot_bytes() — stummer Screenshot** ✅
 - [x] **Bot-Chrome PID Hardcode — nie Main-Chrome** ✅
 - [x] **Dynamischer Vision-Prompt je nach Page-State** ✅
@@ -1030,7 +1030,7 @@ Die State-Detection nutzt `ask_vision_text()` das KEIN Koordinaten-Parsing brauc
 
 ### Was passiert ist
 
-`cua-driver call page '{"pid":...,"window_id":...,"action":"enable_javascript_apple_events","bundle_id":"com.google.Chrome","user_has_confirmed_enabling":true}'` wurde erfolgreich ausgeführt (2×: einmal auf Main-Chrome PID 2253, einmal auf Bot-Chrome PID 54777).
+`**skylight-cli** call page '{"pid":...,"window_id":...,"action":"enable_javascript_apple_events","bundle_id":"com.google.Chrome","user_has_confirmed_enabling":true}'` wurde erfolgreich ausgeführt (2×: einmal auf Main-Chrome PID 2253, einmal auf Bot-Chrome PID 54777).
 
 ### Problem: Chrome 147 hat AppleScript-JS-Bridge BROKEN
 
@@ -1040,14 +1040,14 @@ Preferences wurden KORREKT gepatcht (`appleevents = allowed` in BEIDEN Profilen)
 ❌ "Google Chrome hat einen Fehler erhalten: Die Ausführung von JavaScript über AppleScript ist deaktiviert."
 ```
 
-**Ursache:** Chromium 147 (`Google Chrome 147.0.7727.117`) hat die AppleScript-JavaScript-Bridge ab Version ~130 geändert/deaktiviert. Die Preferences-Einstellung `JavaScript von Apple Events erlauben` wird IGNORIERT. Das ist ein **upstream Chrome-Bug/Change**, kein cua-driver-Problem.
+**Ursache:** Chromium 147 (`Google Chrome 147.0.7727.117`) hat die AppleScript-JavaScript-Bridge ab Version ~130 geändert/deaktiviert. Die Preferences-Einstellung `JavaScript von Apple Events erlauben` wird IGNORIERT. Das ist ein **upstream Chrome-Bug/Change**, kein **skylight-cli**-Problem.
 
 **Getestet:**
 - `enable_javascript_apple_events` auf Main-Chrome (PID 2253) → Preferences OK, JS failed
 - Manueller Patch auf Bot-Chrome (`/tmp/heypiggy-bot/Preferences`) → Key vorhanden, JS failed
-- `cua-driver list_windows` funktioniert (Accessibility API, nicht AppleScript)
-- `cua-driver click` funktioniert (CGEventPostToPid, nicht AppleScript)
-- `cua-driver screenshot` funktioniert (ScreenCaptureKit, nicht AppleScript)
+- `**skylight-cli** list_windows` funktioniert (Accessibility API, nicht AppleScript)
+- `**skylight-cli** click` funktioniert (CGEventPostToPid, nicht AppleScript)
+- `**skylight-cli** screenshot` funktioniert (ScreenCaptureKit, nicht AppleScript)
 - **NUR `page.execute_javascript` ist broken** — weil es AppleScript nutzt
 
 ### Konsequenz
@@ -1062,10 +1062,10 @@ Folgende Funktionen sind **DEAKTIVIERT** bis Chrome die AppleScript-Bridge repar
 
 ### Alternative (falls SoM kritisch)
 
-1. **Safari nutzen** — Safari hat `execute_javascript` via AppleEvents noch. `cua-driver` unterstützt Safari (`com.apple.Safari`). Nachteil: Bot-Profil müsste Safari sein, HeyPiggy neu anmelden.
+1. **Safari nutzen** — Safari hat `execute_javascript` via AppleEvents noch. `**skylight-cli**` unterstützt Safari (`com.apple.Safari`). Nachteil: Bot-Profil müsste Safari sein, HeyPiggy neu anmelden.
 2. **Firefox** — ebenfalls unterstützt.
 3. **Auf Chrome-Update warten** — Google hat keine offizielle Aussage, aber Chromium-Issues dazu.
-4. **`get_window_state` (AX-Tree)** — cua-driver kann interaktive Elemente via Accessbility-Tree erkennen. Kein JS nötig. Ist aber weniger präzise als DOM-Selektoren.
+4. **`get_window_state` (AX-Tree)** — **skylight-cli** kann interaktive Elemente via Accessbility-Tree erkennen. Kein JS nötig. Ist aber weniger präzise als DOM-Selektoren.
 
 **Aktuelle Entscheidung:** Wir bleiben bei Chrome + OCR-First Grid ohne SoM. Der Survey-Loop läuft stabil (nachgewiesen: 2× Klick "posted"). SoM wäre nice-to-have, kein blocker.
 
@@ -1075,12 +1075,12 @@ Folgende Funktionen sind **DEAKTIVIERT** bis Chrome die AppleScript-Bridge repar
 
 ### Änderungen in mcp_survey_runner.py
 - Import von `detect_panel` und `build_panel_prompt_block` aus `panel_overrides.py`
-- Neue Funktion `get_current_url(pid, wid)` — extrahiert URL via `cua-driver get_window_state`
+- Neue Funktion `get_current_url(pid, wid)` — extrahiert URL via `**skylight-cli** get_window_state`
 - `detect_page_state(img, pid, wid)` gibt jetzt `(state, panel)` Tupel zurück (panel ist `PanelRules` oder `None`)
 - `build_prompt(state, panel)` fügt Panel-Prompt-Block hinzu, falls Panel erkannt wurde
 
 ### Funktionsweise
-1. Bei jedem Screenshot wird die aktuelle URL via cua-driver geholt
+1. Bei jedem Screenshot wird die aktuelle URL via **skylight-cli** geholt
 2. `detect_panel(url, body_text)` matcht URL gegen `PANELS`-Registry in `panel_overrides.py`
 3. `build_panel_prompt_block(panel, body_text)` erzeugt provider-spezifische Hinweise (Quality-Traps, DQ-Marker, Continue-Labels)
 4. Dieser Block wird an das Vision-Prompt angehängt → bessere Antworten für panel-spezifische Fragen
@@ -1098,7 +1098,7 @@ Folgende Funktionen sind **DEAKTIVIERT** bis Chrome die AppleScript-Bridge repar
 ## Update: Session-Cache for Login (Issue #130)
 
 ### Implementierung
-`cua-driver` bietet keine Cookie-Management-API (`list-tools` zeigt keine Cookie-Tools). Stattdessen nutzt Bot-Chrome bereits `--user-data-dir=/tmp/heypiggy-bot`, das:
+`**skylight-cli**` bietet keine Cookie-Management-API (`list-tools` zeigt keine Cookie-Tools). Stattdessen nutzt Bot-Chrome bereits `--user-data-dir=/tmp/heypiggy-bot`, das:
 - Cookies, localStorage, sessionStorage persistent speichert
 - Sitzungen über Neustarts hinweg erhält
 - 72h TTL implizit durch Chrome's eigene Speicherung erfüllt
@@ -1152,7 +1152,7 @@ Erledigt durch Chrome's native `user-data-dir` Funktionalität.
 
 ### Subissues Status
 - #131-1 (page state transitions): ✅ Working
-- #131-2 (form fill via cua-driver): ✅ Working (text input clicks)
+- #131-2 (form fill via **skylight-cli**): ✅ Working (text input clicks)
 - #131-3 (error recovery): ✅ Working (falls back to Next/Weiter prompt)
 - #132-1 (HeyPiggy EUR banners): ✅ Validated (124.00 extracted)
 - #132-2 (panel-specific EUR): Pending (need panel survey)
@@ -1164,7 +1164,7 @@ Erledigt durch Chrome's native `user-data-dir` Funktionalität.
 - Monitor for DQ (disqualification) handling
 
 ## Stealth Triade Migration — COMPLETE
-- Alle 5 verbotenen Patterns eliminiert (cua-driver, open -na, AXStaticText, No-Vision, No-unmask)
+- Alle 5 verbotenen Patterns eliminiert (**skylight-cli**, open -na, AXStaticText, No-Vision, No-unmask)
 - 9/9 Bugs gefixed
 - 49+ obsolete Issues geschlossen
 - Nur #167 (Epic) bleibt als Tracker offen
