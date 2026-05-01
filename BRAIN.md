@@ -5,6 +5,13 @@
 > **AKTUELLER STAND (30.4.2026):** Stealth-Quad ist aktiv. Profile in `stealth-runner/profiles/jeremy.yaml`.
 > Login: `stealth-runner/cli/heypiggy-login`. Survey: `stealth-runner/cli/heypiggy-survey-*`.
 > screen-follow zeichnet alles auf. Alle Docs auf SOTA-Niveau.
+>
+> ## 🚨 AKTIVE CODEBASIS (2026-05-01)
+> - **AKTIV**: `~/dev/stealth-runner/` → `runner/live_eye.py` + `runner/live_omni_monitor.py`
+> - **Modell**: `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` (NICHT llama-3.2-11b-vision!)
+> - **Optimierungen v6**: JPEG q=50, SSE Streaming, JSON-enforced Prompt
+> - **Siehe**: `stealth-runner/AGENTS.md` für vollständige Architektur
+> - **WARNUNG**: Dieses Repo (A2A-SIN-Worker-heypiggy) ist **ARCHIVIERT** — alle Änderungen in `stealth-runner/` machen!
 
 
 ## 💀 STATUS: ARCHIVIERT
