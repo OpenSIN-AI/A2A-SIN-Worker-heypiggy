@@ -1,89 +1,27 @@
-# issues.md — All Issues (Updated 2026-05-01)
+# issues.md - Offene Issues & Known Bugs
 
-## 2026-05-02: Doctor Scan
+## MASTER ISSUE - Productization Sprint (10 Tage)
+**Ziel:** Login -> Survey -> Completion -> Balance-Check stabil machen.
 
-**Fehlende Docs (2):**
+### Subissues
+- [ ] SR-01: Stabilitaetsbaseline und Erfolgsmetriken definieren
+- [ ] SR-02: Command-Reliability fuer kritische Aktionen haerten
+- [ ] SR-03: End-to-End-Flow schliessen
+- [ ] SR-04: Recovery-Layer mit Retry/Backoff/Snapshots bauen
+- [ ] SR-05: Observability mit Logs, Metriken und Alerts ergaenzen
+- [ ] SR-06: Minimalen Produkt-Shell bauen
+- [ ] SR-07: Queue, Session-Isolation und Skalierung vorbereiten
+- [ ] SR-08: Quality Gates und Smoke-Tests ergaenzen
+- [ ] SR-09: Adoption Pack erstellen
+- [ ] SR-10: Release-Readiness Review durchfuehren
 
-- [ ] `CODEOWNERS`
-- [ ] `ROADMAP.md`
+### Definition of Done
+- Core-Steps schlagen zuverlaessig an
+- Fehler werden automatisch erkannt und abgefangen
+- Status ist jederzeit sichtbar
+- neue Laeufe starten ohne Codeaenderung
 
-**Offene Findings:** 0
-
-## 2026-05-02: Doctor Scan
-
-**Fehlende Docs (2):**
-
-- [ ] `CODEOWNERS`
-- [ ] `ROADMAP.md`
-
-**Offene Findings:** 0
-
-## SOTA Master Issues
-
-| #        | Plan                         | Issue                                                                    | Repo            | Priority    |
-| -------- | ---------------------------- | ------------------------------------------------------------------------ | --------------- | ----------- |
-| SOTA-001 | BFG Credential Purge         | [#168](https://github.com/OpenSIN-AI/A2A-SIN-Worker-heypiggy/issues/168) | A2A             | P0-CRITICAL |
-| SOTA-002 | Monolith Split               | [#169](https://github.com/OpenSIN-AI/A2A-SIN-Worker-heypiggy/issues/169) | A2A             | P0-CRITICAL |
-| SOTA-003 | screen-follow Test Suite     | [#5](https://github.com/SIN-CLIs/screen-follow/issues/5)                 | screen-follow   | P1-HIGH     |
-| SOTA-004 | skylight-cli Unit Tests      | [#77](https://github.com/SIN-CLIs/skylight-cli/issues/77)                | skylight-cli    | P1-HIGH     |
-| SOTA-005 | PyPI Release playstealth-cli | [#75](https://github.com/SIN-CLIs/playstealth-cli/issues/75)             | playstealth-cli | P1-HIGH     |
-| SOTA-006 | Live EUR Canary              | [#170](https://github.com/OpenSIN-AI/A2A-SIN-Worker-heypiggy/issues/170) | A2A             | P0-CRITICAL |
-| SOTA-007 | Multi-Account Support        | [#171](https://github.com/OpenSIN-AI/A2A-SIN-Worker-heypiggy/issues/171) | A2A             | P2-MEDIUM   |
-
-## Completed: Cross-Repo Integration & Vision-Free Fast Path
-
-- **stealth-runner** `b1eee1e`: unmask driver, screen-follow driver, DOM_PRESCAN state
-- **playstealth-cli** `a8865ba`: CreepJS stealth benchmark CI (80% gate)
-- **A2A** `35a76f0`: Vision-free survey answers via answer-router confidence gate
-- **CEO Strategic Verdict**: `docs/CEO_STRATEGIC_VERDICT_2026-05-01.md`
-
-## stealth-runner
-
-| #   | Title                                | Status         |
-| --- | ------------------------------------ | -------------- |
-| #1  | Epic: Stealth Triad Greenfield Build | OPEN (tracker) |
-| #2  | CLI flags usage examples             | ✅ CLOSED      |
-| #3  | CLI flags section                    | ✅ CLOSED      |
-| #4  | Update CLI help text → skylight-cli  | OPEN (P2)      |
-| #5  | SoM references in Vision prompts     | ✅ IMPLEMENTED |
-| #6  | Merge workflow CONTRIBUTING.md       | ✅ CLOSED      |
-| #7  | Panel override logic sin_survey_core | ✅ CLOSED      |
-| #8  | Error recovery                       | ✅ IMPLEMENTED |
-| #9  | P0-PRIVACY Targeted Window Capture   | ✅ CLOSED      |
-
-## A2A-SIN-Worker-heypiggy
-
-| #    | Title                           | Status         |
-| ---- | ------------------------------- | -------------- |
-| #167 | Stealth-Triade Epic             | OPEN (tracker) |
-| #168 | SOTA-001: BFG Credential Purge  | OPEN           |
-| #169 | SOTA-002: Monolith Split        | OPEN           |
-| #170 | SOTA-006: Live EUR Canary       | OPEN           |
-| #171 | SOTA-007: Multi-Account Support | OPEN           |
-| 49+  | CDP/DOM obsolete                | CLOSED         |
-
-## skylight-cli
-
-| #   | Title                      | Status            |
-| --- | -------------------------- | ----------------- |
-| #41 | Epic v1.0 (35 sub-issues)  | OPEN              |
-| #76 | Lücken Analysis            | OPEN (2/6 closed) |
-| #77 | SOTA-004: Unit Tests 1→15+ | OPEN              |
-
-## screen-follow
-
-| #   | Title                      | Status |
-| --- | -------------------------- | ------ |
-| #5  | SOTA-003: Test Suite 0→20+ | OPEN   |
-
-## playstealth-cli
-
-| #   | Title                       | Status |
-| --- | --------------------------- | ------ |
-| #75 | SOTA-005: PyPI Release v1.0 | OPEN   |
-
-## unmask-cli
-
-| #   | Title            | Status |
-| --- | ---------------- | ------ |
-| —   | 1 existing issue | OPEN   |
+### Plan References
+- stealth-runner/MASTER-PLAN-2026-05-02.md (canonical)
+- stealth-runner/ROADMAP-10-DAY-2026-05-02.md
+- stealth-runner/issues.md
