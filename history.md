@@ -1,5 +1,30 @@
 # history.md — Development History (Updated 2026-05-01)
 
+## 2026-05-02: Fix — docs: doctor-v6 — scan + fix + generate
+
+**Commits (10):**
+
+- `6f73c40 docs: doctor-v6 — scan + fix + generate`
+- `f9e92fb docs: history.md — Archivierung + Cross-Reference`
+- `1cfd470 docs: archive warning + cross-reference to stealth-runner`
+- `78c4243 docs: doctor-audit — auto-fix`
+- `d6cd5d9 docs: doctor-audit — auto-fix`
+- … und 5 weitere
+
+**Geänderte Dateien:**
+
+- .github/PULL_REQUEST_TEMPLATE.md | 6 +-
+- .gitignore | 2 +
+- .opencode/opencode.json | 1 +
+- A2A-CARD.md | 38 +-
+- AGENTS.md | 4 +
+- BRAIN.md | 417 +++++++++++++--------
+- CHANGELOG.md | 4 +-
+- CODE_OF_CONDUCT.md | 5 +
+- CONTRIBUTING.md | 1 +
+- README.md | 42 +--
+- … und 59 weitere
+
 ## 2026-05-02: Dokumentation — docs: history.md — Archivierung + Cross-Reference
 
 **Commits (10):**

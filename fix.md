@@ -2,6 +2,8 @@
 
 ## 2026-05-02: Doctor Scan — 0 Fixes
 
+## 2026-05-02: Doctor Scan — 0 Fixes
+
 ## SOTA-Fixes (Mai 2026)
 
 | #   | Problem                     | Lösung                                                  | Commit                |

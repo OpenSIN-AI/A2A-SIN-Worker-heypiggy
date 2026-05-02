@@ -9,6 +9,15 @@
 
 **Offene Findings:** 0
 
+## 2026-05-02: Doctor Scan
+
+**Fehlende Docs (2):**
+
+- [ ] `CODEOWNERS`
+- [ ] `ROADMAP.md`
+
+**Offene Findings:** 0
+
 ## SOTA Master Issues
 
 | #        | Plan                         | Issue                                                                    | Repo            | Priority    |
