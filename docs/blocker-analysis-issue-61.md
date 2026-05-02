@@ -35,12 +35,14 @@ Nach erfolgreichem Google-Login fehlt **jeder deterministische Code-Pfad, der di
 ### Cause 2: Dashboard-Ranking-Block feuert nur bei URL-Token `page=dashboard`
 
 `heypiggy_vision_worker.py:2641-2644`:
+
 ```python
 is_dashboard = (
     ("heypiggy.com" in current_url.lower() or "heypiggy" in (page_context or "").lower())
     and "page=dashboard" in (page_context or "").lower()
 )
 ```
+
 - Google-OAuth redirectet i. d. R. auf `https://www.heypiggy.com/`, `/?tab=surveys` oder `/dashboard` — **niemals automatisch** auf `/?page=dashboard` (das ist ein Legacy-Query-Tab).
 - Fallback-Text-Check (`"Deine verfügbaren Erhebungen"`) matcht nur auf Deutsch; bei englischer Browser-Locale schlägt auch der fehl.
 - **Konsequenz:** `dashboard_block` bleibt leer, Vision bekommt keine Top-5-Liste mit `ref`-IDs, kein "DRINGENDE AKTION: click_ref auf die TOP-1 Karte".
@@ -48,12 +50,14 @@ is_dashboard = (
 ### Cause 3: Generischer Clickable-Scan auf 25 Elemente gekappt
 
 `heypiggy_vision_worker.py:2044-2070`:
+
 ```js
 var all = document.querySelectorAll('[onclick], [role="button"], a[href], button,
     input[type="submit"], [style*="cursor: pointer"], .survey-item, .survey-card,
     [class*="card"], [class*="survey"]');
 for (var i = 0; i < Math.min(all.length, 25); i++) { ... }
 ```
+
 - Auf dem HeyPiggy-Dashboard liefern Navbar, Profil-Dropdown, Filter, FAQ-Links, Footer und Social-Icons **locker >25 Treffer** im Query-Selector **bevor** die ersten `div.survey-item`-Kacheln kommen.
 - Der Scan iteriert in DOM-Reihenfolge — Umfrage-Karten landen typischerweise jenseits von Index 25.
 - **Konsequenz:** `clickable_info` enthält keine Survey-IDs. Vision kann nur die generischen `#nav-*`-Buttons klicken → no_progress.
@@ -61,6 +65,7 @@ for (var i = 0; i < Math.min(all.length, 25); i++) { ... }
 ### Cause 4: Kein explizites Dashboard-Navigate nach Login
 
 `heypiggy_vision_worker.py:5662-5670`:
+
 ```python
 if "login" in _current_url or "signin" in _current_url or not _current_url:
     _google_result = await attempt_google_login(email or "")
@@ -71,6 +76,7 @@ if "login" in _current_url or "signin" in _current_url or not _current_url:
 # --- kein navigate() zur Dashboard-URL ---
 # Hauptloop startet sofort.
 ```
+
 - Nach OAuth landet der Tab, wo immer HeyPiggy ihn zurückwirft (Root-Page, Onboarding-Modal, Consent-Popup, Welcome-Screen).
 - Weder `platform_profile.active().dashboard_url` (`https://www.heypiggy.com/`) noch `/?page=dashboard` werden aktiv angesteuert.
 - **Konsequenz:** Vision sieht möglicherweise eine Welcome-Seite oder ein Modal und hat kein mentales Modell "ich bin auf dem Dashboard".
@@ -85,13 +91,13 @@ if "login" in _current_url or "signin" in _current_url or not _current_url:
 
 ## Vorgeschlagene Fixes (Reihenfolge = Priorität)
 
-| Fix | Wirkung | Aufwand | Datei / Zeile |
-|---|---|---|---|
-| **F1** (Root-Fix): Nach `after_google_login` explizit `await SURVEY_ORCHESTRATOR.begin()` aufrufen. Orchestrator navigiert dann zur Dashboard-URL **und** klickt die beste Karte selbstständig. Vision wird erst für die Screener-Frage aktiviert. | Eliminiert Cause 1+4 in einem Schritt. | ~15 LOC | `heypiggy_vision_worker.py` nach Z. 5668 |
-| **F2**: `is_dashboard`-Check umbauen: URL-Pfad-Prefix (`/`, `/dashboard`, `/?page=dashboard`, `/?tab=surveys`) + Existenz eines `div.survey-item` im DOM. Query-Token-Check entfernen. | Dashboard-Ranking-Block wird auch bei Homepage-Landing geladen. | ~20 LOC | Z. 2641-2644 |
-| **F3**: Im `js_scan` die Priorität umdrehen: erst `.survey-item, [id^="survey-"]` (unlimitiert), dann andere Elemente (25 Cap). | Survey-Karten kommen garantiert in `clickable_info`. | ~10 LOC | Z. 2041-2071 |
-| **F4**: `human_delay` nach Google-Login auf `8-14 s` + aktive URL-Stabilitäts-Probe (drei gleiche Samples in 2 s Abstand). | Kein Screenshot während OAuth-Redirect. | ~15 LOC | Z. 5667 |
-| **F5**: `HIGHEST_REWARD_JS` im Orchestrator um `div.survey-item, [class*="SurveyCard"]` erweitern, falls HeyPiggy das Frontend-CSS migriert. | Robustheit gegen Frontend-Refactor. | ~5 LOC | `survey_orchestrator.py:164-191` |
+| Fix                                                                                                                                                                                                                                                | Wirkung                                                         | Aufwand | Datei / Zeile                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------- | ---------------------------------------- |
+| **F1** (Root-Fix): Nach `after_google_login` explizit `await SURVEY_ORCHESTRATOR.begin()` aufrufen. Orchestrator navigiert dann zur Dashboard-URL **und** klickt die beste Karte selbstständig. Vision wird erst für die Screener-Frage aktiviert. | Eliminiert Cause 1+4 in einem Schritt.                          | ~15 LOC | `heypiggy_vision_worker.py` nach Z. 5668 |
+| **F2**: `is_dashboard`-Check umbauen: URL-Pfad-Prefix (`/`, `/dashboard`, `/?page=dashboard`, `/?tab=surveys`) + Existenz eines `div.survey-item` im DOM. Query-Token-Check entfernen.                                                             | Dashboard-Ranking-Block wird auch bei Homepage-Landing geladen. | ~20 LOC | Z. 2641-2644                             |
+| **F3**: Im `js_scan` die Priorität umdrehen: erst `.survey-item, [id^="survey-"]` (unlimitiert), dann andere Elemente (25 Cap).                                                                                                                    | Survey-Karten kommen garantiert in `clickable_info`.            | ~10 LOC | Z. 2041-2071                             |
+| **F4**: `human_delay` nach Google-Login auf `8-14 s` + aktive URL-Stabilitäts-Probe (drei gleiche Samples in 2 s Abstand).                                                                                                                         | Kein Screenshot während OAuth-Redirect.                         | ~15 LOC | Z. 5667                                  |
+| **F5**: `HIGHEST_REWARD_JS` im Orchestrator um `div.survey-item, [class*="SurveyCard"]` erweitern, falls HeyPiggy das Frontend-CSS migriert.                                                                                                       | Robustheit gegen Frontend-Refactor.                             | ~5 LOC  | `survey_orchestrator.py:164-191`         |
 
 **Alle fünf Fixes zusammen = ~65 LOC** + passende Tests in `tests/test_survey_orchestrator.py` / `tests/test_heypiggy_vision_worker.py`.
 
@@ -113,4 +119,4 @@ if "login" in _current_url or "signin" in _current_url or not _current_url:
 
 ---
 
-*Analyse durchgeführt von v0 am 2026-04-19. Code-Zeilenangaben beziehen sich auf Commit-Basis `main` @ `34bf4a3c`.*
+_Analyse durchgeführt von v0 am 2026-04-19. Code-Zeilenangaben beziehen sich auf Commit-Basis `main` @ `34bf4a3c`._

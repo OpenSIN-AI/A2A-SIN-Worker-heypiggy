@@ -1,5 +1,30 @@
 # history.md — Development History (Updated 2026-05-01)
 
+## 2026-05-02: Dokumentation — docs: history.md — Archivierung + Cross-Reference
+
+**Commits (10):**
+
+- `f9e92fb docs: history.md — Archivierung + Cross-Reference`
+- `1cfd470 docs: archive warning + cross-reference to stealth-runner`
+- `78c4243 docs: doctor-audit — auto-fix`
+- `d6cd5d9 docs: doctor-audit — auto-fix`
+- `07e83f4 docs: doctor-audit — auto-fix veraltete Claims + Credentials`
+- … und 5 weitere
+
+**Geänderte Dateien:**
+
+- .markdownlint-cli2.jsonc | 17 +++
+- .opencode/opencode.json | 1 +
+- AGENTS.md | 4 +-
+- BRAIN.md | 131 +++++++++++----------
+- CODE_OF_CONDUCT.md | 4 +
+- SUPPORT.md | 4 +
+- ULTRA-PLAN.md | 2 +-
+- anti-learn.md | 3 +
+- api.md | 4 +
+- banned.md | 4 +-
+- … und 14 weitere
+
 ## 2026-05-01: Archivierung + Cross-Reference
 
 - **BRAIN.md**: 🚨 Archivierungs-Warnung + Verweis auf aktive Codebase in `stealth-runner`
@@ -27,7 +52,7 @@
 
 **CEO Strategic Verdict:** `docs/CEO_STRATEGIC_VERDICT_2026-05-01.md` (444 Zeilen)
 
-**7 SOTA-Pläne erstellt:** `docs/sota-plans/` mit GH Issues #168-#171 und SIN-CLIs/*#5,#75,#77
+**7 SOTA-Pläne erstellt:** `docs/sota-plans/` mit GH Issues #168-#171 und SIN-CLIs/\*#5,#75,#77
 
 **Security-Breach dokumentiert:** `.env` mit HEYPIGGY_PASSWORD und NVIDIA_API_KEY im Git-Track. Fix geplant als SOTA-001.
 

@@ -11,6 +11,7 @@
 **Objective:** Establish reliable unit test suite for skylight-cli (1.145 LOC Swift, 1 SmokeTest).
 
 **Key Results:**
+
 - KR1: Test count from 1 → 15+ (15 unit tests minimum)
 - KR2: `swift test` passes in CI
 - KR3: AXPress click logic covered by tests
@@ -25,6 +26,7 @@
 **Weaknesses:** 1 SmokeTest. 0 unit tests for critical click path. AXElementFinder has complex recursive tree walker — untested.
 
 **Critical Gaps:**
+
 - AXPress click (`AXUIElementPerformAction`) has zero tests
 - SoMOverlay overlay rendering has zero tests
 - Element sorting/filtering in AXElementFinder has zero tests
@@ -34,21 +36,21 @@
 
 ## Decisions
 
-| Decision | Rationale | Alternatives | Owner |
-|----------|-----------|-------------|-------|
-| Protocol-based mock for AXUIElement | Enables testing without real accessibility tree | Subclass AXUIElement (impossible, opaque) | Swift |
-| Test SoM rendering via CGImage comparison | Visual regression testing for overlay correctness | Pixel-diff (adds complexity) | Swift |
-| Focus on AXElementFinder + Utils first | Most impactful, no AX dependency needed | Test CLI first (integration, harder) | Swift |
+| Decision                                  | Rationale                                         | Alternatives                              | Owner |
+| ----------------------------------------- | ------------------------------------------------- | ----------------------------------------- | ----- |
+| Protocol-based mock for AXUIElement       | Enables testing without real accessibility tree   | Subclass AXUIElement (impossible, opaque) | Swift |
+| Test SoM rendering via CGImage comparison | Visual regression testing for overlay correctness | Pixel-diff (adds complexity)              | Swift |
+| Focus on AXElementFinder + Utils first    | Most impactful, no AX dependency needed           | Test CLI first (integration, harder)      | Swift |
 
 ---
 
 ## Assumptions
 
-| Assumption | Confidence | Validation Method |
-|------------|-----------|-------------------|
-| `AXUIElement` protocol can be mocked | 0.85 | Attempt protocol conformance in test |
-| SoM overlay produces deterministic output | 0.90 | Compare rendered CGImage hashes |
-| `swift test` runs in CI without Accessibility permissions | 0.70 | macOS runner with `--parallel` flag |
+| Assumption                                                | Confidence | Validation Method                    |
+| --------------------------------------------------------- | ---------- | ------------------------------------ |
+| `AXUIElement` protocol can be mocked                      | 0.85       | Attempt protocol conformance in test |
+| SoM overlay produces deterministic output                 | 0.90       | Compare rendered CGImage hashes      |
+| `swift test` runs in CI without Accessibility permissions | 0.70       | macOS runner with `--parallel` flag  |
 
 ---
 
@@ -91,17 +93,18 @@ graph TD
 
 ## Risk Register
 
-| ID | Risk | Likelihood | Impact | Score | Mitigation | Owner |
-|----|------|-----------|--------|-------|------------|-------|
-| R1 | AXUIElement cannot be mocked (opaque object) | 0.35 | 7 | 24.5 | Test via real AX tree in integration test | Swift |
-| R2 | SoM rendering uses private CoreGraphics APIs | 0.2 | 5 | 10 | Test in simulated offscreen context | Swift |
-| R3 | WindowCapture needs real window in test | 0.4 | 6 | 24 | Use CGImage from file as mock input | Swift |
+| ID  | Risk                                         | Likelihood | Impact | Score | Mitigation                                | Owner |
+| --- | -------------------------------------------- | ---------- | ------ | ----- | ----------------------------------------- | ----- |
+| R1  | AXUIElement cannot be mocked (opaque object) | 0.35       | 7      | 24.5  | Test via real AX tree in integration test | Swift |
+| R2  | SoM rendering uses private CoreGraphics APIs | 0.2        | 5      | 10    | Test in simulated offscreen context       | Swift |
+| R3  | WindowCapture needs real window in test      | 0.4        | 6      | 24    | Use CGImage from file as mock input       | Swift |
 
 **Overall Risk Score:** 58.5 → HIGH (mitigate R1 and R3)
 
 ---
 
 ## Rollback Plan
+
 - **Trigger:** Mock-based tests fail due to AXUIElement being unmockable
 - **Action:** Convert to integration tests using real AX tree on dev machine
 - **Max Loss:** P2 time (2-3h), plus infrastructure restructure
@@ -109,6 +112,7 @@ graph TD
 ---
 
 ## Done Criteria
+
 - [ ] `swift test` reports 15+ tests green
 - [ ] All 9 source modules have at least 1 test
 - [ ] AXPress path tested (mock or integration)
@@ -118,9 +122,10 @@ graph TD
 ---
 
 ## Approval Gates
+
 - [ ] Swift Lead
 - [ ] CI/DevOps Lead
 
 ---
 
-*Plan ID: SOTA-PLAN-004 | Quality Score: 80/100 | Overall Risk: 58.5 (HIGH)*
+_Plan ID: SOTA-PLAN-004 | Quality Score: 80/100 | Overall Risk: 58.5 (HIGH)_

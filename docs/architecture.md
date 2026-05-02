@@ -4,19 +4,19 @@ See `docs/RFC-architecture-reset.md` for the rationale.
 
 ## Module map
 
-| Module | Issue | Responsibility |
-|--------|-------|----------------|
-| `opensin_bridge/contract.py`       | #69 | Method registry, error codes, retry hints, version |
-| `opensin_bridge/adapter.py`        | #69 | Contract-aware RPC client with retry + trace |
-| `opensin_bridge/observability.py`  | #70 | TraceRecorder (JSONL per session) |
-| `opensin_bridge/evidence.py`       | #70 | Pulls `bridge.evidenceBundle` + screenshot sidecar |
-| `opensin_bridge/session_lifecycle.py` | #71 | Manifest, health, LKG, invalidate |
-| `opensin_runtime/state_machine.py` | #72 | Deterministic IDLE->DONE/FAILED FSM |
-| `opensin_runtime/panels.py`        | #75 | Loads panel plugins from `platforms/registry.json` |
-| `opensin_interaction/engine.py`    | #73 | click/type/scroll with snapshot-based retry |
-| `opensin_stealth/strategy.py`      | #74 | Pluggable pre-action + challenge strategies |
-| `opensin_validation/harness.py`    | #76 | Static + live contract parity checks |
-| `opensin_bridge_integration.py`    | -   | Shim for legacy `heypiggy_vision_worker.py` |
+| Module                                | Issue | Responsibility                                     |
+| ------------------------------------- | ----- | -------------------------------------------------- |
+| `opensin_bridge/contract.py`          | #69   | Method registry, error codes, retry hints, version |
+| `opensin_bridge/adapter.py`           | #69   | Contract-aware RPC client with retry + trace       |
+| `opensin_bridge/observability.py`     | #70   | TraceRecorder (JSONL per session)                  |
+| `opensin_bridge/evidence.py`          | #70   | Pulls `bridge.evidenceBundle` + screenshot sidecar |
+| `opensin_bridge/session_lifecycle.py` | #71   | Manifest, health, LKG, invalidate                  |
+| `opensin_runtime/state_machine.py`    | #72   | Deterministic IDLE->DONE/FAILED FSM                |
+| `opensin_runtime/panels.py`           | #75   | Loads panel plugins from `platforms/registry.json` |
+| `opensin_interaction/engine.py`       | #73   | click/type/scroll with snapshot-based retry        |
+| `opensin_stealth/strategy.py`         | #74   | Pluggable pre-action + challenge strategies        |
+| `opensin_validation/harness.py`       | #76   | Static + live contract parity checks               |
+| `opensin_bridge_integration.py`       | -     | Shim for legacy `heypiggy_vision_worker.py`        |
 
 ## Adopting the new stack from the legacy worker
 

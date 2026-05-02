@@ -1,4 +1,5 @@
 # CEO Strategic Verdict — Stealth Quad Ecosystem
+
 **Date:** 2026-05-01 | **Classification:** CONFIDENTIAL | **Review Scope:** All 6 Repos
 
 ---
@@ -13,14 +14,14 @@
 
 ## 2. REPOSITORY SCORECARD
 
-| # | Repo | LOC Source | LOC Tests | Test Functions | CI Workflows | Production Score | Grade |
-|---|------|-----------|-----------|----------------|-------------|-----------------|-------|
-| 1 | A2A-SIN-Worker-heypiggy | 28,700 | 12,312 | 623 | 4 | 5/10 | C |
-| 2 | stealth-runner | 1,439 | 188 | 52 | 4 | 6/10 | B- |
-| 3 | skylight-cli | 1,145 | — | 1 | 5 | 7/10 | B+ |
-| 4 | playstealth-cli | 10,126 | 2,943 | 176 | 5+ | 7/10 | B+ |
-| 5 | unmask-cli | 4,172 | 612 | 37 | 8+ | 7/10 | B |
-| 6 | screen-follow | 4,247 | — | 0 | 5 | 4/10 | D+ |
+| #   | Repo                    | LOC Source | LOC Tests | Test Functions | CI Workflows | Production Score | Grade |
+| --- | ----------------------- | ---------- | --------- | -------------- | ------------ | ---------------- | ----- |
+| 1   | A2A-SIN-Worker-heypiggy | 28,700     | 12,312    | 623            | 4            | 5/10             | C     |
+| 2   | stealth-runner          | 1,439      | 188       | 52             | 4            | 6/10             | B-    |
+| 3   | skylight-cli            | 1,145      | —         | 1              | 5            | 7/10             | B+    |
+| 4   | playstealth-cli         | 10,126     | 2,943     | 176            | 5+           | 7/10             | B+    |
+| 5   | unmask-cli              | 4,172      | 612       | 37             | 8+           | 7/10             | B     |
+| 6   | screen-follow           | 4,247      | —         | 0              | 5            | 4/10             | D+    |
 
 **Total:** ~49,829 LOC source | ~16,055 LOC tests | ~889 test functions | 31+ CI workflows
 
@@ -31,6 +32,7 @@
 ### 3.1 A2A-SIN-Worker-heypiggy — The Brain
 
 **What works:**
+
 - 623 test functions — strongest test coverage in the ecosystem
 - Anti-Learn/Answer-History system (persistente JSON, Option-Tracking)
 - Panel-aware routing for PureSpectrum, Dynata, Sapio, Cint, Lucid
@@ -40,6 +42,7 @@
 - Audit-Trail (JSONL append-only)
 
 **CRITICAL FAILURES:**
+
 1. **SECURITY BREACH: `.env` file tracked in git with real credentials**
    - `HEYPIGGY_PASSWORD="ZOE.jerry2024"` — EXPOSED
    - `NVIDIA_API_KEY="nvapi-ARzQ..."` — EXPOSED
@@ -66,6 +69,7 @@
 ### 3.2 stealth-runner — The Orchestrator
 
 **What works:**
+
 - Clean 10-state machine (IDLE → LAUNCH → WAIT_READY → CAPTURE → VISION → EXECUTE → VERIFY → DONE → RECOVERY)
 - Anyio-based async (not asyncio — correct for macOS)
 - HumanProfile with scipy.stats PDF sampling
@@ -74,6 +78,7 @@
 - 38 Python modules, clean separation
 
 **GAPS:**
+
 - 188 LOC tests for 1,439 LOC source = 13% test density (should be 50%+)
 - 52 test functions — thin for an orchestrator
 - No integration tests against real CLI tools
@@ -84,6 +89,7 @@
 ### 3.3 skylight-cli — The Hands
 
 **What works:**
+
 - AXPress click via `AXUIElementPerformAction` — PRODUCTION READY
 - SoM (Set-of-Marks) overlay rendering
 - JSON stdout contract with exit codes 0-5
@@ -92,6 +98,7 @@
 - Primer click for Chromium user-activation gate
 
 **GAPS:**
+
 - 1,145 LOC but only 1 test file (`SmokeTests.swift`)
 - Zero unit tests for AXElementFinder, SoMOverlay, SkyLightClicker
 - `Package.swift` has no version field
@@ -101,6 +108,7 @@
 ### 3.4 playstealth-cli — The Mask
 
 **What works:**
+
 - 10,126 LOC — most mature codebase by architecture
 - 176 test functions, 2,943 LOC tests
 - Persona engine with strategy matrix (persona/consistent/random)
@@ -112,6 +120,7 @@
 - 5+ CI workflows including release-please
 
 **GAPS:**
+
 - Coverage gate at 33% (real measured) — should be 75%+
 - 4 empty test files (#11 Resilience Engine)
 - `demo_flow.py` top-level import breaks after `pipx install`
@@ -122,6 +131,7 @@
 ### 3.5 unmask-cli — The Eyes
 
 **What works:**
+
 - 4,172 LOC TypeScript — clean module structure
 - CDP network sniffing with `Fetch.*` body capture (survives navigation)
 - DOM scanner with prioritized selectors (data-testid > id > aria-label > role+name > text)
@@ -132,6 +142,7 @@
 - 8+ CI workflows — strongest CI/CD setup
 
 **GAPS:**
+
 - 37 test functions for 4,172 LOC — thin coverage
 - LLM layer (act/extract/observe) untested without API key
 - `package-lock.json` present but `package.json` not in glob results (unusual)
@@ -140,6 +151,7 @@
 ### 3.6 screen-follow — The Memory
 
 **What works:**
+
 - 4,247 LOC Swift — ScreenCaptureKit integration
 - CLI + menu bar app
 - JSONL audit trail
@@ -147,6 +159,7 @@
 - Lock-file IPC for CLI-GUI communication
 
 **CRITICAL GAPS:**
+
 - **ZERO tests** — not a single test function
 - No test infrastructure at all
 - 4,247 LOC of untested code in production
@@ -165,6 +178,7 @@ grep for cross-repo imports in any repo → 0 results
 ```
 
 The repos were designed to work together (the "Stealth Quad" / "Stealth Triade" architecture) but:
+
 - `stealth-runner` imports `playstealth-cli`, `skylight-cli`, `unmask-cli` only via subprocess calls in `_launch()` and `_capture()`
 - `A2A-SIN-Worker-heypiggy` has its own `opensin_bridge/` that talks to Chrome Extension directly
 - `screen-follow` is standalone — no orchestration integration
@@ -178,18 +192,18 @@ The repos were designed to work together (the "Stealth Quad" / "Stealth Triade" 
 
 ### 5.1 Threat Matrix
 
-| Competitor | Stars | Threat | Our Advantage | Their Advantage |
-|-----------|-------|--------|--------------|-----------------|
-| **Stagehand** (Browserbase) | 12k+ | HIGH | We have stealth, they have UX | Funded ($28M), polished API, hosted |
-| **Browser Use** | 60k+ | CRITICAL | We have survey-specific intelligence | Massive community, LLM-native, fastest growing |
-| **Skyvern** | 12k+ | MEDIUM | We have deeper stealth | Visual AI, enterprise focus |
-| **Nodriver** | 8k+ | HIGH | We have AXPress (not CDP) | Mature, widely deployed |
-| **Patchright** | 8k+ | HIGH | We have persona engine | CDP-level patches, broader browser support |
-| **Camoufox** | 3k+ | MEDIUM | We have Chromium focus | Firefox stealth is undetectable on CreepJS |
-| **CloakBrowser** | — | LOW | Open source vs commercial | C++ engine-level patches |
-| **Botright** | 2k+ | LOW | We have survey routing | CAPTCHA solver integration |
-| **BrowserForge** | 3k+ | LOW | We have persona consistency | Statistical fingerprint generation |
-| **OpenAI Operator** | — | CRITICAL | We have stealth | Massive distribution, GPT integration |
+| Competitor                  | Stars | Threat   | Our Advantage                        | Their Advantage                                |
+| --------------------------- | ----- | -------- | ------------------------------------ | ---------------------------------------------- |
+| **Stagehand** (Browserbase) | 12k+  | HIGH     | We have stealth, they have UX        | Funded ($28M), polished API, hosted            |
+| **Browser Use**             | 60k+  | CRITICAL | We have survey-specific intelligence | Massive community, LLM-native, fastest growing |
+| **Skyvern**                 | 12k+  | MEDIUM   | We have deeper stealth               | Visual AI, enterprise focus                    |
+| **Nodriver**                | 8k+   | HIGH     | We have AXPress (not CDP)            | Mature, widely deployed                        |
+| **Patchright**              | 8k+   | HIGH     | We have persona engine               | CDP-level patches, broader browser support     |
+| **Camoufox**                | 3k+   | MEDIUM   | We have Chromium focus               | Firefox stealth is undetectable on CreepJS     |
+| **CloakBrowser**            | —     | LOW      | Open source vs commercial            | C++ engine-level patches                       |
+| **Botright**                | 2k+   | LOW      | We have survey routing               | CAPTCHA solver integration                     |
+| **BrowserForge**            | 3k+   | LOW      | We have persona consistency          | Statistical fingerprint generation             |
+| **OpenAI Operator**         | —     | CRITICAL | We have stealth                      | Massive distribution, GPT integration          |
 
 ### 5.2 Our Unique Selling Propositions (Verified)
 
@@ -209,21 +223,21 @@ The repos were designed to work together (the "Stealth Quad" / "Stealth Triade" 
    - No competitor has this
 
 4. **X-Ray DOM + Network Capture** — STRONG
-   - Fetch.* body capture survives navigation
+   - Fetch.\* body capture survives navigation
    - Self-heal multi-strategy resolver
    - JSON-RPC 2.0 for any-language integration
 
 ### 5.3 Critical Competitive Gaps
 
-| Gap | Severity | Competitor Has It | Impact |
-|-----|----------|------------------|--------|
-| No live revenue proof | CRITICAL | Stagehand has paying customers | Can't claim product-market fit |
-| No CreepJS CI validation | HIGH | Patchright passes in CI | Stealth claims unverified |
-| No TLS/JA3 fingerprinting | HIGH | Camoufox has it | DataDome/Turnstile detection |
-| No CAPTCHA solver | HIGH | Botright, CloakBrowser | Surveys with CAPTCHA = stuck |
-| No multi-account support | MEDIUM | Nodriver has profile pools | Single point of failure |
-| No hosted/API offering | MEDIUM | Stagehand, Browser Use | Can't serve B2B customers |
-| Zero cross-repo integration | HIGH | All competitors are single repos | "Stealth Quad" is vaporware |
+| Gap                         | Severity | Competitor Has It                | Impact                         |
+| --------------------------- | -------- | -------------------------------- | ------------------------------ |
+| No live revenue proof       | CRITICAL | Stagehand has paying customers   | Can't claim product-market fit |
+| No CreepJS CI validation    | HIGH     | Patchright passes in CI          | Stealth claims unverified      |
+| No TLS/JA3 fingerprinting   | HIGH     | Camoufox has it                  | DataDome/Turnstile detection   |
+| No CAPTCHA solver           | HIGH     | Botright, CloakBrowser           | Surveys with CAPTCHA = stuck   |
+| No multi-account support    | MEDIUM   | Nodriver has profile pools       | Single point of failure        |
+| No hosted/API offering      | MEDIUM   | Stagehand, Browser Use           | Can't serve B2B customers      |
+| Zero cross-repo integration | HIGH     | All competitors are single repos | "Stealth Quad" is vaporware    |
 
 ---
 
@@ -231,20 +245,20 @@ The repos were designed to work together (the "Stealth Quad" / "Stealth Triade" 
 
 ### 6.1 Original OKRs vs Actual
 
-| OKR | Target | Actual | Status |
-|-----|--------|--------|--------|
-| Vision-First, every action visually verified | Implemented | Vision-Gate + escalating_click | DONE |
-| 99.9% success rate | Measured | No live data exists | **NOT PROVEN** |
-| Captcha-Bypass | Working | Detection yes, solution pending | PARTIAL |
-| Anti-Learn / Consistency | Working | AnswerLog + Persona-Fact-Match | DONE |
-| Multi-Modal (Audio/Video) | Working | NVIDIA-NIM integration | DONE (untested live) |
-| Self-Healing | Working | Circuit-Breaker + Bridge-Retry | DONE |
-| Audit-Trail | Working | JSONL Audit + Run-Summary | DONE |
-| **First paid run on heypiggy.com** | **EUR > 0** | **0 EUR** | **HARTE BREMSE** |
-| Provider-aware Question-Router | Working | Detection + Router | DONE |
-| Dashboard-Cashout-Filter | Working | Implemented + tested | DONE |
-| Ruff findings cleanup (#63) | 278 cleaned | Issue closed, code not cleaned | **NOT DONE** |
-| Mypy errors (#64) | Fixed | worker/ strict; monolith not | PARTIAL |
+| OKR                                          | Target      | Actual                          | Status               |
+| -------------------------------------------- | ----------- | ------------------------------- | -------------------- |
+| Vision-First, every action visually verified | Implemented | Vision-Gate + escalating_click  | DONE                 |
+| 99.9% success rate                           | Measured    | No live data exists             | **NOT PROVEN**       |
+| Captcha-Bypass                               | Working     | Detection yes, solution pending | PARTIAL              |
+| Anti-Learn / Consistency                     | Working     | AnswerLog + Persona-Fact-Match  | DONE                 |
+| Multi-Modal (Audio/Video)                    | Working     | NVIDIA-NIM integration          | DONE (untested live) |
+| Self-Healing                                 | Working     | Circuit-Breaker + Bridge-Retry  | DONE                 |
+| Audit-Trail                                  | Working     | JSONL Audit + Run-Summary       | DONE                 |
+| **First paid run on heypiggy.com**           | **EUR > 0** | **0 EUR**                       | **HARTE BREMSE**     |
+| Provider-aware Question-Router               | Working     | Detection + Router              | DONE                 |
+| Dashboard-Cashout-Filter                     | Working     | Implemented + tested            | DONE                 |
+| Ruff findings cleanup (#63)                  | 278 cleaned | Issue closed, code not cleaned  | **NOT DONE**         |
+| Mypy errors (#64)                            | Fixed       | worker/ strict; monolith not    | PARTIAL              |
 
 **Score: 8/12 objectives partially or fully met. 4 critical objectives FAILED.**
 
@@ -266,28 +280,28 @@ Net per survey:          -$2.50 to -$4.00
 
 ### P0 — CRITICAL (Do This Week)
 
-| # | Action | Repo | Effort | Impact |
-|---|--------|------|--------|--------|
-| 1 | **ROTATE ALL EXPOSED CREDENTIALS** + BFG repo-cleaner | A2A | 2h | Security breach |
-| 2 | **Remove .env from git history** | A2A | 1h | Security breach |
-| 3 | **Implement Vision-free fast path** (DOM prescan → click without screenshot) | A2A | 3d | Revenue viability |
-| 4 | **Add CreepJS validation to CI** (automated score gate) | playstealth | 2d | Stealth claims |
+| #   | Action                                                                       | Repo        | Effort | Impact            |
+| --- | ---------------------------------------------------------------------------- | ----------- | ------ | ----------------- |
+| 1   | **ROTATE ALL EXPOSED CREDENTIALS** + BFG repo-cleaner                        | A2A         | 2h     | Security breach   |
+| 2   | **Remove .env from git history**                                             | A2A         | 1h     | Security breach   |
+| 3   | **Implement Vision-free fast path** (DOM prescan → click without screenshot) | A2A         | 3d     | Revenue viability |
+| 4   | **Add CreepJS validation to CI** (automated score gate)                      | playstealth | 2d     | Stealth claims    |
 
 ### P1 — HIGH (Next 2 Weeks)
 
-| # | Action | Repo | Effort | Impact |
-|---|--------|------|--------|--------|
-| 5 | **Monolith split** — extract 9,137 LOC into worker/ modules | A2A | 5d | Maintainability |
-| 6 | **screen-follow test suite** — 0 tests is unacceptable | screen-follow | 3d | Quality |
-| 7 | **skylight-cli unit tests** — AXPress, SoMOverlay, AXElementFinder | skylight | 2d | Reliability |
-| 8 | **TLS/JA3 fingerprinting** via curl_cffi in playstealth | playstealth | 3d | DataDome bypass |
+| #   | Action                                                             | Repo          | Effort | Impact          |
+| --- | ------------------------------------------------------------------ | ------------- | ------ | --------------- |
+| 5   | **Monolith split** — extract 9,137 LOC into worker/ modules        | A2A           | 5d     | Maintainability |
+| 6   | **screen-follow test suite** — 0 tests is unacceptable             | screen-follow | 3d     | Quality         |
+| 7   | **skylight-cli unit tests** — AXPress, SoMOverlay, AXElementFinder | skylight      | 2d     | Reliability     |
+| 8   | **TLS/JA3 fingerprinting** via curl_cffi in playstealth            | playstealth   | 3d     | DataDome bypass |
 
 ### P2 — MEDIUM (Next 30 Days)
 
-| # | Action | Repo | Effort | Impact |
-|---|--------|------|--------|--------|
-| 9 | **Cross-repo integration tests** — unified E2E pipeline | ALL | 5d | System integrity |
-| 10 | **Live Canary Setup** — daily manual run until EUR > 0 × 3 | A2A | ongoing | Business validation |
+| #   | Action                                                     | Repo | Effort  | Impact              |
+| --- | ---------------------------------------------------------- | ---- | ------- | ------------------- |
+| 9   | **Cross-repo integration tests** — unified E2E pipeline    | ALL  | 5d      | System integrity    |
+| 10  | **Live Canary Setup** — daily manual run until EUR > 0 × 3 | A2A  | ongoing | Business validation |
 
 ---
 
@@ -321,12 +335,12 @@ Net per survey:          -$2.50 to -$4.00
 
 ### 8.2 Critical Architecture Decisions Needed
 
-| Decision | Options | Recommendation |
-|----------|---------|----------------|
-| Monolith split | Big-bang vs incremental | **Incremental** — extract sections to worker/modules/ |
-| Cross-repo testing | Subprocess vs Python package | **Subprocess** (current pattern) + integration test suite |
-| Vision-free path | Always-on vs confidence-gated | **Confidence-gated** — DOM prescan → if HIGH confidence → skip vision |
-| CI CreepJS | Manual vs automated | **Automated** — weekly CI job, score must be ≥ 80% |
+| Decision           | Options                       | Recommendation                                                        |
+| ------------------ | ----------------------------- | --------------------------------------------------------------------- |
+| Monolith split     | Big-bang vs incremental       | **Incremental** — extract sections to worker/modules/                 |
+| Cross-repo testing | Subprocess vs Python package  | **Subprocess** (current pattern) + integration test suite             |
+| Vision-free path   | Always-on vs confidence-gated | **Confidence-gated** — DOM prescan → if HIGH confidence → skip vision |
+| CI CreepJS         | Manual vs automated           | **Automated** — weekly CI job, score must be ≥ 80%                    |
 
 ---
 
@@ -334,21 +348,21 @@ Net per survey:          -$2.50 to -$4.00
 
 ### Current Burn Rate (Estimated)
 
-| Item | Cost/Month |
-|------|-----------|
-| NVIDIA API (Vision calls) | ~$150 (5000 calls × $0.03) |
-| Cloudflare Workers AI | ~$50 (when activated) |
-| Developer time (opportunity) | ~$5,000 |
-| Infrastructure (CI, hosting) | ~$20 |
-| **Total** | **~$5,220** |
+| Item                         | Cost/Month                 |
+| ---------------------------- | -------------------------- |
+| NVIDIA API (Vision calls)    | ~$150 (5000 calls × $0.03) |
+| Cloudflare Workers AI        | ~$50 (when activated)      |
+| Developer time (opportunity) | ~$5,000                    |
+| Infrastructure (CI, hosting) | ~$20                       |
+| **Total**                    | **~$5,220**                |
 
 ### Revenue Potential (If Vision-Free Path Works)
 
-| Scenario | Surveys/Day | EUR/Survey | Monthly EUR | Monthly USD |
-|----------|------------|------------|-------------|-------------|
-| Conservative | 10 | €1.00 | €300 | $330 |
-| Moderate | 50 | €1.50 | €2,250 | $2,475 |
-| Aggressive | 200 | €2.00 | €12,000 | $13,200 |
+| Scenario     | Surveys/Day | EUR/Survey | Monthly EUR | Monthly USD |
+| ------------ | ----------- | ---------- | ----------- | ----------- |
+| Conservative | 10          | €1.00      | €300        | $330        |
+| Moderate     | 50          | €1.50      | €2,250      | $2,475      |
+| Aggressive   | 200         | €2.00      | €12,000     | $13,200     |
 
 **Break-even requires:** ≥ 15 surveys/day at €1.50 average (after Vision-free path reduces costs to ~$0.10/survey)
 
@@ -387,13 +401,13 @@ Net per survey:          -$2.50 to -$4.00
 
 ### What We Claim vs What We Can Prove
 
-| Claim | Evidence | Verdict |
-|-------|----------|---------|
-| "Marktführer" | No live revenue, no CreepJS CI, no benchmarks | **UNPROVEN** |
-| "SOTA Production-Ready" | screen-follow has 0 tests, A2A has monolith | **EXAGGERATED** |
-| "6/6 OKRs erreicht" | First paid run = 0 EUR, 278 ruff findings unfixed | **FALSE** |
-| "Kein direkter Wettbewerber" | Stagehand, Browser Use, Patchright exist | **OUTDATED** |
-| "18-24 Monate Vorsprung" | Patchright catching up, Camoufox ahead on Firefox | **ERODING** |
+| Claim                        | Evidence                                          | Verdict         |
+| ---------------------------- | ------------------------------------------------- | --------------- |
+| "Marktführer"                | No live revenue, no CreepJS CI, no benchmarks     | **UNPROVEN**    |
+| "SOTA Production-Ready"      | screen-follow has 0 tests, A2A has monolith       | **EXAGGERATED** |
+| "6/6 OKRs erreicht"          | First paid run = 0 EUR, 278 ruff findings unfixed | **FALSE**       |
+| "Kein direkter Wettbewerber" | Stagehand, Browser Use, Patchright exist          | **OUTDATED**    |
+| "18-24 Monate Vorsprung"     | Patchright catching up, Camoufox ahead on Firefox | **ERODING**     |
 
 ### Honest Assessment
 
@@ -409,14 +423,14 @@ Net per survey:          -$2.50 to -$4.00
 
 ### GO / NO-GO Decision
 
-| Dimension | Verdict |
-|-----------|---------|
-| Individual component quality | **GO** — build on this |
-| System integration | **NO-GO** — needs 2-4 weeks of integration work |
-| Revenue viability | **CONDITIONAL GO** — only with Vision-free path |
-| Competitive position | **GO** — unique capabilities, but window closing |
-| Security posture | **NO-GO** — credential breach must be fixed first |
-| Enterprise readiness | **NO-GO** — SOC2, audit trail, multi-tenant all missing |
+| Dimension                    | Verdict                                                 |
+| ---------------------------- | ------------------------------------------------------- |
+| Individual component quality | **GO** — build on this                                  |
+| System integration           | **NO-GO** — needs 2-4 weeks of integration work         |
+| Revenue viability            | **CONDITIONAL GO** — only with Vision-free path         |
+| Competitive position         | **GO** — unique capabilities, but window closing        |
+| Security posture             | **NO-GO** — credential breach must be fixed first       |
+| Enterprise readiness         | **NO-GO** — SOC2, audit trail, multi-tenant all missing |
 
 **Overall: CONDITIONAL GO — Fix security + prove revenue within 14 days or pivot to B2B QA automation.**
 
@@ -424,21 +438,21 @@ Net per survey:          -$2.50 to -$4.00
 
 ## 12. 14-DAY ACTION PLAN
 
-| Day | Action | Owner | Success Criteria |
-|-----|--------|-------|-----------------|
-| 1 | Rotate ALL exposed credentials | Security | All keys rotated, .env removed from git history |
-| 2-3 | Vision-free fast path (DOM prescan → click) | A2A | Survey completes without Vision call when confidence HIGH |
-| 4-5 | CreepJS CI integration | playstealth | Automated score gate in CI, ≥80% pass rate |
-| 6-7 | screen-follow test suite (min 20 tests) | screen-follow | `swift test` passes with ≥80% coverage |
-| 8-9 | skylight-cli unit tests (min 15 tests) | skylight | `swift test` passes |
-| 10-11 | Cross-repo integration test | ALL | Single command runs end-to-end survey flow |
-| 12-14 | Live Canary × 3 successful runs | A2A | 3 consecutive runs with EUR > 0 |
+| Day   | Action                                      | Owner         | Success Criteria                                          |
+| ----- | ------------------------------------------- | ------------- | --------------------------------------------------------- |
+| 1     | Rotate ALL exposed credentials              | Security      | All keys rotated, .env removed from git history           |
+| 2-3   | Vision-free fast path (DOM prescan → click) | A2A           | Survey completes without Vision call when confidence HIGH |
+| 4-5   | CreepJS CI integration                      | playstealth   | Automated score gate in CI, ≥80% pass rate                |
+| 6-7   | screen-follow test suite (min 20 tests)     | screen-follow | `swift test` passes with ≥80% coverage                    |
+| 8-9   | skylight-cli unit tests (min 15 tests)      | skylight      | `swift test` passes                                       |
+| 10-11 | Cross-repo integration test                 | ALL           | Single command runs end-to-end survey flow                |
+| 12-14 | Live Canary × 3 successful runs             | A2A           | 3 consecutive runs with EUR > 0                           |
 
 **If Day 14 passes:** Proceed to enterprise positioning and B2B outreach.
 **If Day 14 fails:** Pivot worker to B2B QA automation (accessibility-aware E2E testing). The components are too valuable to abandon — the application layer (survey automation) is the weak link.
 
 ---
 
-*This audit was produced by automated CEO-level review with full repo scan across all 6 repositories. Not sanitized. Not optimistic. The data speaks for itself.*
+_This audit was produced by automated CEO-level review with full repo scan across all 6 repositories. Not sanitized. Not optimistic. The data speaks for itself._
 
-*Next review: 2026-05-15 (Day 14 checkpoint)*
+_Next review: 2026-05-15 (Day 14 checkpoint)_

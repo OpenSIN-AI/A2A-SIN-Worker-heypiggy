@@ -30,22 +30,22 @@ Produkt fuehrend? Wo sind die akuten Bremsen?
 
 ## 2. Sind die Ziele erreicht?
 
-| Ziel laut README / Issues                              | Stand 2026-04-28                                         | Bewertung |
-| ------------------------------------------------------ | -------------------------------------------------------- | --------- |
-| "Vision-First, jede Aktion visuell verifiziert"        | Implementiert (Vision-Gate, escalating_click)            | erfuellt   |
-| "99,9% Erfolgsrate"                                    | Keine belastbaren Live-Daten; Replay-Tests sagen nichts  | **NICHT belegbar** |
-| "Captcha-Bypass"                                       | Erkennung ja, Loesung haengt am Provider                 | teilweise |
-| "Anti-Rausflug / Konsistenz"                           | `AnswerLog` + Persona-Fact-Match vorhanden               | erfuellt   |
-| "Multi-Modal (Audio/Video)"                            | NVIDIA-NIM-Integration vorhanden                         | erfuellt (untested live) |
-| "Self-Healing"                                         | Circuit-Breaker, Bridge-Retry, Resilience-Engine         | erfuellt   |
-| "Audit-Trail"                                          | JSONL Audit + Run-Summary                                | erfuellt   |
-| **"Erster bezahlter Run auf heypiggy.com"**            | **NICHT erreicht — 0 EUR ausgezahlt**                    | **HARTE BREMSE** |
-| Provider-aware Question-Router (Issue #81)             | Detection ja, Router ja (mit diesem Commit)              | erfuellt   |
-| Dashboard-Cashout-Filter (Issue #84)                   | Implementiert + Test                                     | erfuellt   |
-| Click-Bypass eliminieren (Issue #85)                   | Pipeline zentralisiert; SKIP_PREFLIGHT gehaertet         | erfuellt (mit diesem Commit) |
-| 278 Ruff-Findings (#63)                                | Issue geschlossen, Code nicht aufgeraeumt                | **NICHT erfuellt** |
-| Mypy-Errors (#64)                                      | `worker/`-Paket strict; Monolith nicht                   | teilweise |
-| Bandit / pip-audit / detect-secrets (#65)              | CI vorhanden; Findings nicht alle adressiert             | teilweise |
+| Ziel laut README / Issues                       | Stand 2026-04-28                                        | Bewertung                    |
+| ----------------------------------------------- | ------------------------------------------------------- | ---------------------------- |
+| "Vision-First, jede Aktion visuell verifiziert" | Implementiert (Vision-Gate, escalating_click)           | erfuellt                     |
+| "99,9% Erfolgsrate"                             | Keine belastbaren Live-Daten; Replay-Tests sagen nichts | **NICHT belegbar**           |
+| "Captcha-Bypass"                                | Erkennung ja, Loesung haengt am Provider                | teilweise                    |
+| "Anti-Rausflug / Konsistenz"                    | `AnswerLog` + Persona-Fact-Match vorhanden              | erfuellt                     |
+| "Multi-Modal (Audio/Video)"                     | NVIDIA-NIM-Integration vorhanden                        | erfuellt (untested live)     |
+| "Self-Healing"                                  | Circuit-Breaker, Bridge-Retry, Resilience-Engine        | erfuellt                     |
+| "Audit-Trail"                                   | JSONL Audit + Run-Summary                               | erfuellt                     |
+| **"Erster bezahlter Run auf heypiggy.com"**     | **NICHT erreicht — 0 EUR ausgezahlt**                   | **HARTE BREMSE**             |
+| Provider-aware Question-Router (Issue #81)      | Detection ja, Router ja (mit diesem Commit)             | erfuellt                     |
+| Dashboard-Cashout-Filter (Issue #84)            | Implementiert + Test                                    | erfuellt                     |
+| Click-Bypass eliminieren (Issue #85)            | Pipeline zentralisiert; SKIP_PREFLIGHT gehaertet        | erfuellt (mit diesem Commit) |
+| 278 Ruff-Findings (#63)                         | Issue geschlossen, Code nicht aufgeraeumt               | **NICHT erfuellt**           |
+| Mypy-Errors (#64)                               | `worker/`-Paket strict; Monolith nicht                  | teilweise                    |
+| Bandit / pip-audit / detect-secrets (#65)       | CI vorhanden; Findings nicht alle adressiert            | teilweise                    |
 
 **Fazit:** Auf Code-Ebene ist der Worker weiter als die meisten Vision-Survey-
 Bots, die man im Open Source findet. Auf **Geschaeftsebene ist er nicht produktiv**.
@@ -216,5 +216,5 @@ heyPiggy-Spezifik aufzugeben (siehe 4.5).
 
 ---
 
-*Audit erstellt durch automatischen CEO-Review mit vollstaendigem Repo-Scan.
-Nicht beschoenigt. Bei Widerspruch: dieselben Daten, andere Wertung.*
+_Audit erstellt durch automatischen CEO-Review mit vollstaendigem Repo-Scan.
+Nicht beschoenigt. Bei Widerspruch: dieselben Daten, andere Wertung._

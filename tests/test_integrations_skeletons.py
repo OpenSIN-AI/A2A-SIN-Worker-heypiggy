@@ -205,11 +205,15 @@ class TestSkeletonContracts:
         """
         client = PlaystealthClient(binary="x")
         with pytest.raises(ValueError):
-            asyncio.get_event_loop().run_until_complete(
+            loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(
                 client.click_survey(index=-1)
             )
         with pytest.raises(ValueError):
-            asyncio.get_event_loop().run_until_complete(
+            loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(
                 client.run_survey(index=0, max_steps=0)
             )
 

@@ -11,6 +11,7 @@
 **Objective:** Reduce `heypiggy_vision_worker.py` from 9.137 Zeilen to <500 Zeilen by extracting numbered sections into self-contained modules.
 
 **Key Results:**
+
 - KR1: Main file < 500 LOC (from 9.137 LOC)
 - KR2: 0 new test failures after every extraction step
 - KR3: No circular imports in extracted modules
@@ -23,6 +24,7 @@
 **Strengths:** Monolith has clear `# NN. SECTION-NAME` markers (section 16, 17, etc.). Code already has function-level structure. Good test coverage (623 tests).
 
 **Weaknesses:**
+
 - Single file: 9.137 lines, 389 KB
 - Every change risks secondary damage
 - `mypy` only strict on `worker/` package, not monolith
@@ -30,6 +32,7 @@
 - 76 Python modules across repo, but monolith dominates
 
 **Critical Gaps:**
+
 - No extraction tooling (AST-based safe refactoring)
 - `worker/` package (21 files, 4.005 LOC) duplicates logic
 - `worker/` vs monolith confusion (two workers exist)
@@ -38,23 +41,23 @@
 
 ## Decisions
 
-| Decision | Rationale | Alternatives | Owner |
-|----------|-----------|-------------|-------|
-| Incremental extraction (1 section per PR) | Safe, testable, no Big-Bang risk | Big-bang rewrite (high risk) | Engineering |
-| Extract to `worker/modules/` NOT `worker/` | Avoids collision with existing worker package | New `heypiggy_core/` package | Engineering |
-| Keep existing function signatures | Minimizes test breakage | Refactor signatures (better but riskier) | Engineering |
-| `py_compile` + `pytest` as validation gate per extraction | Fast feedback, no manual review needed | Full lint + mypy (slower) | CI |
+| Decision                                                  | Rationale                                     | Alternatives                             | Owner       |
+| --------------------------------------------------------- | --------------------------------------------- | ---------------------------------------- | ----------- |
+| Incremental extraction (1 section per PR)                 | Safe, testable, no Big-Bang risk              | Big-bang rewrite (high risk)             | Engineering |
+| Extract to `worker/modules/` NOT `worker/`                | Avoids collision with existing worker package | New `heypiggy_core/` package             | Engineering |
+| Keep existing function signatures                         | Minimizes test breakage                       | Refactor signatures (better but riskier) | Engineering |
+| `py_compile` + `pytest` as validation gate per extraction | Fast feedback, no manual review needed        | Full lint + mypy (slower)                | CI          |
 
 ---
 
 ## Assumptions
 
-| Assumption | Confidence | Validation Method |
-|------------|-----------|-------------------|
-| Sections can be extracted without circular imports | 0.90 | Python `import` analysis per extraction |
-| Existing tests exercise extracted code paths | 0.85 | Run full test suite per extraction |
-| `worker/modules/` import path won't conflict | 0.95 | `python -c "import worker.modules"` check |
-| Monolith functions don't mutate shared globals | 0.70 | Code review per section extraction |
+| Assumption                                         | Confidence | Validation Method                         |
+| -------------------------------------------------- | ---------- | ----------------------------------------- |
+| Sections can be extracted without circular imports | 0.90       | Python `import` analysis per extraction   |
+| Existing tests exercise extracted code paths       | 0.85       | Run full test suite per extraction        |
+| `worker/modules/` import path won't conflict       | 0.95       | `python -c "import worker.modules"` check |
+| Monolith functions don't mutate shared globals     | 0.70       | Code review per section extraction        |
 
 ---
 
@@ -106,18 +109,19 @@ graph TD
 
 ## Risk Register
 
-| ID | Risk | Likelihood | Impact | Score | Mitigation | Owner |
-|----|------|-----------|--------|-------|------------|-------|
-| R1 | Circular import breaks extraction | 0.4 | 6 | 24 | Deferred import or interface extraction | Engineering |
-| R2 | Monolith globals (CURRENT_TAB_ID, etc.) break modules | 0.6 | 8 | 48 | Extract to shared `worker/state.py` first | Engineering |
-| R3 | Test mocking breaks after extraction | 0.3 | 5 | 15 | Update mocks per extraction, run full suite | Engineering |
-| R4 | Performance regression from module imports | 0.2 | 3 | 6 | Profile before/after, lazy imports | Engineering |
+| ID  | Risk                                                  | Likelihood | Impact | Score | Mitigation                                  | Owner       |
+| --- | ----------------------------------------------------- | ---------- | ------ | ----- | ------------------------------------------- | ----------- |
+| R1  | Circular import breaks extraction                     | 0.4        | 6      | 24    | Deferred import or interface extraction     | Engineering |
+| R2  | Monolith globals (CURRENT_TAB_ID, etc.) break modules | 0.6        | 8      | 48    | Extract to shared `worker/state.py` first   | Engineering |
+| R3  | Test mocking breaks after extraction                  | 0.3        | 5      | 15    | Update mocks per extraction, run full suite | Engineering |
+| R4  | Performance regression from module imports            | 0.2        | 3      | 6     | Profile before/after, lazy imports          | Engineering |
 
 **Overall Risk Score:** 93 → BLOCKER LEVEL (mitigate R2 first, then proceed)
 
 ---
 
 ## Rollback Plan
+
 - **Trigger:** Any extraction causes 3+ test failures that can't be fixed in <2h
 - **Action:** `git revert` the extraction commit, document why extraction failed
 - **Max Loss:** 2-4h of engineering time
@@ -125,6 +129,7 @@ graph TD
 ---
 
 ## Done Criteria
+
 - [ ] `wc -l heypiggy_vision_worker.py` < 500
 - [ ] `pytest tests/ -q` → 623+ passed
 - [ ] Zero circular imports (`python -c "from heypiggy_vision_worker import *"`)
@@ -135,9 +140,10 @@ graph TD
 ---
 
 ## Approval Gates
+
 - [ ] Tech Lead
 - [ ] Engineering Manager
 
 ---
 
-*Plan ID: SOTA-PLAN-002 | Quality Score: 82/100 | Overall Risk: 93 (BLOCKER → mitigate R2 first)*
+_Plan ID: SOTA-PLAN-002 | Quality Score: 82/100 | Overall Risk: 93 (BLOCKER → mitigate R2 first)_

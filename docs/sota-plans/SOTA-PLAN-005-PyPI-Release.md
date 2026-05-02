@@ -11,6 +11,7 @@
 **Objective:** Publish playstealth-cli v1.0.0 on PyPI with working `pip install playstealth-cli`.
 
 **Key Results:**
+
 - KR1: `pip install playstealth-cli` succeeds on Python 3.11+
 - KR2: PyPI package version shows `1.0.0` (from current `0.9.0-beta`)
 - KR3: All 176 existing tests pass in packaged state
@@ -24,6 +25,7 @@
 **Strengths:** Well-structured `pyproject.toml` (setuptools build). CI already has `release-please.yml`. Package already tested via `pip install -e '.[dev]'`. 176 test functions. demo_flow and plugin system working.
 
 **Weaknesses:**
+
 - `demo_flow.py` top-level import breaks after pipx install
 - PyPI badge in README points to nonexistent 1.0.0
 - Language mix in CLI strings (DE/EN)
@@ -32,6 +34,7 @@
 - 4 empty test files (Resilience Engine tests)
 
 **Critical Gaps:**
+
 - Package never published to PyPI
 - No Twine/check-manifest validation
 - Setuptools `py-modules` field may miss some action modules
@@ -41,22 +44,22 @@
 
 ## Decisions
 
-| Decision | Rationale | Alternatives | Owner |
-|----------|-----------|-------------|-------|
-| Setuppy-based build (setuptools) | Already configured, works with pip install -e | Hatchling/Poetry (adds migration cost) | Python |
-| `python -m build` + `twine check` | PyPA standard, validates before upload | `flit publish` (simpler but less control) | Python |
-| Fix demo_flow import before release | Top-level import breaks pipx — known bug | Defer to v1.0.1 (backlog) | Python |
-| Keep 0.9.0-beta tag, release 1.0.0 as new major | Semver convention, clear upgrade path | Overwrite 0.9.0-beta (confusing) | Python |
+| Decision                                        | Rationale                                     | Alternatives                              | Owner  |
+| ----------------------------------------------- | --------------------------------------------- | ----------------------------------------- | ------ |
+| Setuppy-based build (setuptools)                | Already configured, works with pip install -e | Hatchling/Poetry (adds migration cost)    | Python |
+| `python -m build` + `twine check`               | PyPA standard, validates before upload        | `flit publish` (simpler but less control) | Python |
+| Fix demo_flow import before release             | Top-level import breaks pipx — known bug      | Defer to v1.0.1 (backlog)                 | Python |
+| Keep 0.9.0-beta tag, release 1.0.0 as new major | Semver convention, clear upgrade path         | Overwrite 0.9.0-beta (confusing)          | Python |
 
 ---
 
 ## Assumptions
 
-| Assumption | Confidence | Validation Method |
-|------------|-----------|-------------------|
-| All action modules listed in `pyproject.toml` | 0.80 | `python -c "import playstealth_actions"` after install |
-| Playwright dependency works in PyPI context | 0.90 | `pip install playstealth-cli` then `playwright install chromium` |
-| test.pypi.org credentials are available | 0.70 | Check Infisical for PYPI_TOKEN |
+| Assumption                                    | Confidence | Validation Method                                                |
+| --------------------------------------------- | ---------- | ---------------------------------------------------------------- |
+| All action modules listed in `pyproject.toml` | 0.80       | `python -c "import playstealth_actions"` after install           |
+| Playwright dependency works in PyPI context   | 0.90       | `pip install playstealth-cli` then `playwright install chromium` |
+| test.pypi.org credentials are available       | 0.70       | Check Infisical for PYPI_TOKEN                                   |
 
 ---
 
@@ -106,18 +109,19 @@ graph TD
 
 ## Risk Register
 
-| ID | Risk | Likelihood | Impact | Score | Mitigation | Owner |
-|----|------|-----------|--------|-------|------------|-------|
-| R1 | PyPI credentials missing/expired | 0.3 | 9 | 27 | Check Infisical, generate new token if needed | Python |
-| R2 | Playwright binary too large for test install | 0.2 | 4 | 8 | Document `playwright install chromium` as post-install step | Python |
-| R3 | Breaking change introduced | 0.15 | 8 | 12 | Test full install + run survey flow before publishing | Python |
-| R4 | Import error from setuptools py-modules mismatch | 0.25 | 7 | 17.5 | P1-T4 catches this before build | Python |
+| ID  | Risk                                             | Likelihood | Impact | Score | Mitigation                                                  | Owner  |
+| --- | ------------------------------------------------ | ---------- | ------ | ----- | ----------------------------------------------------------- | ------ |
+| R1  | PyPI credentials missing/expired                 | 0.3        | 9      | 27    | Check Infisical, generate new token if needed               | Python |
+| R2  | Playwright binary too large for test install     | 0.2        | 4      | 8     | Document `playwright install chromium` as post-install step | Python |
+| R3  | Breaking change introduced                       | 0.15       | 8      | 12    | Test full install + run survey flow before publishing       | Python |
+| R4  | Import error from setuptools py-modules mismatch | 0.25       | 7      | 17.5  | P1-T4 catches this before build                             | Python |
 
 **Overall Risk Score:** 64.5 → CRITICAL (P1 mitigations installed before P2)
 
 ---
 
 ## Rollback Plan
+
 - **Trigger:** PyPI publish breaks existing installs
 - **Action:** `pip install playstealth-cli==0.9.0-beta` (keep old version tagged), fix and release 1.0.1
 - **Max Loss:** 30 min of any user down time
@@ -125,6 +129,7 @@ graph TD
 ---
 
 ## Done Criteria
+
 - [ ] `pip install playstealth-cli` succeeds on Python 3.11+
 - [ ] `playstealth --version` outputs `1.0.0`
 - [ ] PyPI page shows `1.0.0` with valid README
@@ -134,9 +139,10 @@ graph TD
 ---
 
 ## Approval Gates
+
 - [ ] Python Lead
 - [ ] Release Manager
 
 ---
 
-*Plan ID: SOTA-PLAN-005 | Quality Score: 84/100 | Overall Risk: 64.5 (CRITICAL)*
+_Plan ID: SOTA-PLAN-005 | Quality Score: 84/100 | Overall Risk: 64.5 (CRITICAL)_

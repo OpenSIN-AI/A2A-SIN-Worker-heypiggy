@@ -2,12 +2,12 @@
 
 ## Classification Levels
 
-| Level | Description | Examples |
-|:---|:---|:---|
-| **PUBLIC** | Safe for public repos | README.md, LICENSE, docs/ |
-| **PRIVATE** | Internal logic, safe for org | src/*.ts, src/*.py |
-| **SECRET** | Credentials, keys, tokens | .env, *.pem, auth.json |
-| **LEAKABLE** | Accidentally exposed secrets | API keys, passwords |
+| Level        | Description                  | Examples                  |
+| :----------- | :--------------------------- | :------------------------ |
+| **PUBLIC**   | Safe for public repos        | README.md, LICENSE, docs/ |
+| **PRIVATE**  | Internal logic, safe for org | src/_.ts, src/_.py        |
+| **SECRET**   | Credentials, keys, tokens    | .env, \*.pem, auth.json   |
+| **LEAKABLE** | Accidentally exposed secrets | API keys, passwords       |
 
 ## Rules
 

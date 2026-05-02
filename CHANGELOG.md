@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Test-Fails, E5 Productization) plus Cross-Repo-Issues gegen unmask + playstealth.
 - **`worker/integrations/__init__.py`** — neues Adapter-Paket.
 - **`worker/integrations/unmask_client.py`** — Async JSON-RPC 2.0 Client
-  Skeleton für unmask-cli. Strikt typisierte ``UnmaskResponse``-Parser,
+  Skeleton für unmask-cli. Strikt typisierte `UnmaskResponse`-Parser,
   abstrakter Transport-Layer (stdio / HTTP+WS), JSON-RPC-Envelope-
   Validator. Bodies der RPC-Calls sind Phase 2 — die Surface ist heute
   vertraglich gepinnt.
@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Skeleton für playstealth-cli. Exit-Code-Klassifikation, atomar gelesener
   State-File, Argument-Validation greift heute schon.
 - **`worker/ai/__init__.py`**, **`worker/ai/backend.py`** — AI-Backend-
-  Selektor mit ``AIGatewayBackend`` (primary) und ``PuterFallbackBackend``
+  Selektor mit `AIGatewayBackend` (primary) und `PuterFallbackBackend`
   (optional). Selektor verweigert Vision-Calls über den Puter-Fallback.
 - **`tests/test_integrations_skeletons.py`** — 36 Contract-Tests für die
   drei Skeletons. Alle grün.

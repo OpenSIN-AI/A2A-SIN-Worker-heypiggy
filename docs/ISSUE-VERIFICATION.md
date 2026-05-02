@@ -17,6 +17,7 @@ Format pro Issue: **Status • Code-Evidenz • Test-Evidenz • Verbleibende Lu
 **Status:** WIRKLICH GEFIXT.
 
 **Code-Evidenz:**
+
 - `survey_orchestrator.py:240` — JS-Side Forbidden-Pattern-Regex wird in den
   Page-Scoring-Code injiziert, sodass die Dashboard-Bewertung Cashout-/
   Giftcard-Tiles aktiv ausschliesst.
@@ -31,6 +32,7 @@ Format pro Issue: **Status • Code-Evidenz • Test-Evidenz • Verbleibende Lu
   zentralen URL-Filter-Liste.
 
 **Test-Evidenz:**
+
 - `tests/test_survey_orchestrator.py:565` — `test_v2_dashboard_rejects_cashout_link`
 - `tests/runtime/test_ui_state_classifier.py:41` — `test_cashout_landing_is_classified_as_wrong_landing`
 - `tests/test_heypiggy_vision_worker.py:1206` — `test_needs_post_login_dashboard_bootstrap_for_cashout_page`
@@ -45,6 +47,7 @@ Format pro Issue: **Status • Code-Evidenz • Test-Evidenz • Verbleibende Lu
 **Status:** GROSSTEILS GEFIXT, eine Restschwaeche bis zu diesem Commit.
 
 **Code-Evidenz (positiv):**
+
 - `heypiggy_vision_worker.py:7501-7576` — `run_click_action()` ist die zentrale
   Eskalationspipeline. Jeder Click-Entry-Point laeuft hier durch
   `escalating_click()`. Direkt-Bypass an die Bridge gibt es nicht mehr.
@@ -56,12 +59,14 @@ Format pro Issue: **Status • Code-Evidenz • Test-Evidenz • Verbleibende Lu
   und beendet den Run hart bei Fehler.
 
 **Schwaeche vor diesem Commit:**
+
 - `heypiggy_vision_worker.py:7850-7860` — `SKIP_PREFLIGHT=1` in der Umgebung
   reichte aus, um den fail-closed-Preflight zu deaktivieren. Nur eine
   Audit-Warnung, keine Schutzschicht. Fuer "fail closed" zu schwach: ein
   unbedacht gesetztes ENV-Var im Prod-Container deaktiviert die Sicherheit.
 
 **Mit diesem Commit:**
+
 - `SKIP_PREFLIGHT` wird nur noch akzeptiert, wenn ZUSAETZLICH `WORKER_ENV` in
   `{dev, development, test, ci}` steht **oder** `WORKER_ALLOW_PREFLIGHT_SKIP=1`
   explizit gesetzt ist. Ansonsten wird `SKIP_PREFLIGHT` mit Audit-Eintrag
@@ -93,6 +98,7 @@ geschlossen.
 **Status (vor Commit):** NICHT IMPLEMENTIERT als Router.
 
 Vorhandene Bausteine:
+
 - `panel_overrides.py` — Detection und Prompt-Hint-Generierung.
 - `persona.py:resolve_answer()` — Persona-Fact-Match.
 - `persona.py:AnswerLog.find_prior_answer()` — Konsistenz-Pruefung.
@@ -126,6 +132,7 @@ veraendert.
 **Status:** ALS GESCHLOSSEN MARKIERT, ABER NICHT VOLLSTAENDIG ADRESSIERT.
 
 **Realitaet:**
+
 - `worker/`-Paket ist mypy-strict und ruff-clean. Das ist echt.
 - Der Monolith `heypiggy_vision_worker.py` ist NICHT ruff-clean.
 - Bandit / pip-audit / detect-secrets laufen in CI; Findings werden noch nicht
@@ -150,15 +157,15 @@ spiegelt nicht die Code-Realitaet wider.
 
 ## Zusammenfassung
 
-| Issue | Schliessung | Echt gefixt? | Test-Coverage | Live-Beweis |
-| ----- | ----------- | ------------ | ------------- | ----------- |
-| #84   | sauber      | ja           | ja            | offen       |
-| #85   | sauber      | ja (mit diesem Commit) | wird nachgezogen | offen |
-| #80   | sauber      | ja (depends on #84) | -      | offen       |
-| #81   | offen → Commit | ja (mit diesem Commit) | ja | offen     |
-| #63   | **kosmetisch** | nein, Monolith dirty | -    | -           |
-| #64   | teilweise   | `worker/` ja, Monolith nein | -  | -           |
-| #65   | teilweise   | CI ja, Findings nicht alle behoben | - | -      |
+| Issue | Schliessung    | Echt gefixt?                       | Test-Coverage    | Live-Beweis |
+| ----- | -------------- | ---------------------------------- | ---------------- | ----------- |
+| #84   | sauber         | ja                                 | ja               | offen       |
+| #85   | sauber         | ja (mit diesem Commit)             | wird nachgezogen | offen       |
+| #80   | sauber         | ja (depends on #84)                | -                | offen       |
+| #81   | offen → Commit | ja (mit diesem Commit)             | ja               | offen       |
+| #63   | **kosmetisch** | nein, Monolith dirty               | -                | -           |
+| #64   | teilweise      | `worker/` ja, Monolith nein        | -                | -           |
+| #65   | teilweise      | CI ja, Findings nicht alle behoben | -                | -           |
 
 "Live-Beweis offen" bedeutet: das Code-Verhalten stimmt, aber es gibt keinen
 aktenkundigen Live-Run, der den Fix unter Produktionsbedingungen zeigt.

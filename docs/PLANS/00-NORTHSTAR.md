@@ -60,12 +60,12 @@ Drei harte Wahrheiten aus dem Audit:
 
 ### Verantwortlichkeiten
 
-| Schicht | Repo | Aufgabe |
-|---|---|---|
-| **Orchestrator** | `A2A-SIN-Worker-heypiggy` (dieses Repo) | Session-Loop, Persona, Answer-Routing, Audit-Trail, Earnings-Tracking, Webhook-Out, Recovery. **Keine eigene Browser-Logik.** |
-| **Sees-the-Page** | `SIN-CLIs/unmask-cli` | DOM/Network/Console-Capture, semantic element scan, selfHeal Locator, `act/extract/observe` LLM-API, Replay-Bundles. Wird per JSON-RPC angesprochen. |
-| **Hides-the-Tab** | `SIN-CLIs/playstealth-cli` | Stealth-Browser, Persona-Bindung, human-input rhythms, `open-list` / `click-survey` / `answer-survey`. Wird per CLI-Subprocess angesprochen. |
-| **AI** | Vercel AI Gateway (primary) + Puter (optional fallback) | Vision/Reasoning auf strukturierten Page-Snapshots. Single API-Key, multi-vendor. |
+| Schicht           | Repo                                                    | Aufgabe                                                                                                                                              |
+| ----------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Orchestrator**  | `A2A-SIN-Worker-heypiggy` (dieses Repo)                 | Session-Loop, Persona, Answer-Routing, Audit-Trail, Earnings-Tracking, Webhook-Out, Recovery. **Keine eigene Browser-Logik.**                        |
+| **Sees-the-Page** | `SIN-CLIs/unmask-cli`                                   | DOM/Network/Console-Capture, semantic element scan, selfHeal Locator, `act/extract/observe` LLM-API, Replay-Bundles. Wird per JSON-RPC angesprochen. |
+| **Hides-the-Tab** | `SIN-CLIs/playstealth-cli`                              | Stealth-Browser, Persona-Bindung, human-input rhythms, `open-list` / `click-survey` / `answer-survey`. Wird per CLI-Subprocess angesprochen.         |
+| **AI**            | Vercel AI Gateway (primary) + Puter (optional fallback) | Vision/Reasoning auf strukturierten Page-Snapshots. Single API-Key, multi-vendor.                                                                    |
 
 ## 4. Was muss aus diesem Repo VERSCHWINDEN
 
@@ -98,14 +98,14 @@ Alles andere ist Migrations-Kandidat.
 
 ## 6. Erfolgs-Metriken (KEINE Marketing-Zahlen, sondern Messpunkte)
 
-| Metrik | Zielwert | Wie wird gemessen |
-|---|---|---|
-| **Cents pro 24h** | > 0 in Phase 1, > 100 in Phase 3 | Audit-Log + Account-Balance-Diff |
-| **Surveys completed / day** | > 1 in Phase 1 | Audit-Log `survey_completed` Events |
-| **Disqualification rate** | < 30% | `disq` / `started` aus Telemetry |
-| **Account-Bans / Monat** | 0 | Manuelles Check + Bridge-401-Errors |
-| **Vision-Calls / Survey** | sinkend mit Optimierung | Telemetry per Run |
-| **EUR pro Vision-Call** | > 0 sobald > 0 verdient wird | Cents/24h ÷ Vision-Calls/24h |
+| Metrik                      | Zielwert                         | Wie wird gemessen                   |
+| --------------------------- | -------------------------------- | ----------------------------------- |
+| **Cents pro 24h**           | > 0 in Phase 1, > 100 in Phase 3 | Audit-Log + Account-Balance-Diff    |
+| **Surveys completed / day** | > 1 in Phase 1                   | Audit-Log `survey_completed` Events |
+| **Disqualification rate**   | < 30%                            | `disq` / `started` aus Telemetry    |
+| **Account-Bans / Monat**    | 0                                | Manuelles Check + Bridge-401-Errors |
+| **Vision-Calls / Survey**   | sinkend mit Optimierung          | Telemetry per Run                   |
+| **EUR pro Vision-Call**     | > 0 sobald > 0 verdient wird     | Cents/24h ÷ Vision-Calls/24h        |
 
 ## 7. Wer entscheidet wann was?
 

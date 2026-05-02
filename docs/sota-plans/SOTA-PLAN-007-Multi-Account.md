@@ -11,6 +11,7 @@
 **Objective:** Enable parallel survey automation across multiple heypiggy.com accounts with distinct browser profiles, reducing single-account detection risk.
 
 **Key Results:**
+
 - KR1: 3+ heypiggy accounts runnable simultaneously with distinct Chrome profiles
 - KR2: 0 cross-contamination (cookies, localStorage, fingerprints) between profiles
 - KR3: Profile switching takes <10 seconds
@@ -21,12 +22,14 @@
 ## Current State
 
 **Strengths:**
+
 - `persona.py` already supports profile-based answers
 - Chrome profile directory support via `HEYPIGGY_CHROME_PROFILE_DIR`
 - Session restore with cookies/storage already implemented
 - Playwright context isolation built-in
 
 **Weaknesses:**
+
 - Single account assumption throughout codebase
 - No profile pool management
 - No IP rotation mechanism
@@ -34,6 +37,7 @@
 - `CURRENT_TAB_ID` and `CURRENT_WINDOW_ID` are globals — not profile-safe
 
 **Critical Gaps:**
+
 - No `accounts.json` or profile registry
 - No account health checks (banned? locked? payout threshold reached?)
 - No per-profile Chrome profile directory switching
@@ -44,22 +48,22 @@
 
 ## Decisions
 
-| Decision | Rationale | Alternatives | Owner |
-|----------|-----------|-------------|-------|
-| SQLite account registry | Lightweight, no server needed, transactional | JSON file (race conditions), PostgreSQL (overkill) | Python |
-| Separate Chrome profile per account | Isolation via `--user-data-dir` per profile | Single profile with cookie clearing (not sufficient) | Python |
-| Residential proxy optional (Phase 3) | Adds cost ($5-10/month/proxy) — defer until revenue proven | Always-on proxy (adds cost before revenue) | Product |
-| per-profile state file | Avoids global state contamination | Global state (breaks multi-account) | Engineering |
+| Decision                             | Rationale                                                  | Alternatives                                         | Owner       |
+| ------------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------- | ----------- |
+| SQLite account registry              | Lightweight, no server needed, transactional               | JSON file (race conditions), PostgreSQL (overkill)   | Python      |
+| Separate Chrome profile per account  | Isolation via `--user-data-dir` per profile                | Single profile with cookie clearing (not sufficient) | Python      |
+| Residential proxy optional (Phase 3) | Adds cost ($5-10/month/proxy) — defer until revenue proven | Always-on proxy (adds cost before revenue)           | Product     |
+| per-profile state file               | Avoids global state contamination                          | Global state (breaks multi-account)                  | Engineering |
 
 ---
 
 ## Assumptions
 
-| Assumption | Confidence | Validation Method |
-|------------|-----------|-------------------|
-| heypiggy doesn't enforce 1-account-per-IP aggressively | 0.50 | Test with 2 accounts on same IP first |
-| Chrome profiles under 500MB each | 0.80 | Measure profile size after 10 survey runs |
-| SQLite works across concurrent worker processes | 0.90 | `WAL` mode + file locking |
+| Assumption                                             | Confidence | Validation Method                         |
+| ------------------------------------------------------ | ---------- | ----------------------------------------- |
+| heypiggy doesn't enforce 1-account-per-IP aggressively | 0.50       | Test with 2 accounts on same IP first     |
+| Chrome profiles under 500MB each                       | 0.80       | Measure profile size after 10 survey runs |
+| SQLite works across concurrent worker processes        | 0.90       | `WAL` mode + file locking                 |
 
 ---
 
@@ -108,18 +112,19 @@ graph TD
 
 ## Risk Register
 
-| ID | Risk | Likelihood | Impact | Score | Mitigation | Owner |
-|----|------|-----------|--------|-------|------------|-------|
-| R1 | heypiggy detects multiple accounts on same IP | 0.7 | 10 | 70 | Phase 3 (proxies) or defer multi-account until proxies ready | Product |
-| R2 | Chrome profile corruption across instances | 0.3 | 8 | 24 | File locking per profile, health check before use | Engineering |
-| R3 | Global state refactor breaks existing single-account flow | 0.4 | 7 | 28 | Feature flag: `MULTI_ACCOUNT=1` to enable new code path | Engineering |
-| R4 | Residential proxy cost exceeds revenue | 0.5 | 6 | 30 | Cost/yield analysis before Phase 3, only enable if ROI positive | Product |
+| ID  | Risk                                                      | Likelihood | Impact | Score | Mitigation                                                      | Owner       |
+| --- | --------------------------------------------------------- | ---------- | ------ | ----- | --------------------------------------------------------------- | ----------- |
+| R1  | heypiggy detects multiple accounts on same IP             | 0.7        | 10     | 70    | Phase 3 (proxies) or defer multi-account until proxies ready    | Product     |
+| R2  | Chrome profile corruption across instances                | 0.3        | 8      | 24    | File locking per profile, health check before use               | Engineering |
+| R3  | Global state refactor breaks existing single-account flow | 0.4        | 7      | 28    | Feature flag: `MULTI_ACCOUNT=1` to enable new code path         | Engineering |
+| R4  | Residential proxy cost exceeds revenue                    | 0.5        | 6      | 30    | Cost/yield analysis before Phase 3, only enable if ROI positive | Product     |
 
 **Overall Risk Score:** 152 → BLOCKER (mitigate R1 through Phase 3 deferral strategy. Single-account with correct delays may work.)
 
 ---
 
 ## Rollback Plan
+
 - **Trigger:** Multi-account causes heypiggy account bans or zero EUR return
 - **Action:** Set `MULTI_ACCOUNT=0`, revert to single-account mode
 - **Max Loss:** 3 days of canary running with multiple accounts
@@ -127,6 +132,7 @@ graph TD
 ---
 
 ## Done Criteria
+
 - [ ] `accounts.db` has 3+ valid profile entries
 - [ ] `WorkerInstance` can launch with different profiles
 - [ ] `pytest tests/test_profile_pool.py` → 10+ green
@@ -136,9 +142,10 @@ graph TD
 ---
 
 ## Approval Gates
+
 - [ ] Product Manager (ROI analysis for proxies)
 - [ ] Engineering Lead
 
 ---
 
-*Plan ID: SOTA-PLAN-007 | Quality Score: 75/100 | Overall Risk: 152 (BLOCKER → mitigate through phased approach)*
+_Plan ID: SOTA-PLAN-007 | Quality Score: 75/100 | Overall Risk: 152 (BLOCKER → mitigate through phased approach)_

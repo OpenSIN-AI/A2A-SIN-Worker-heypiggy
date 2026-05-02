@@ -162,6 +162,6 @@ Reihenfolge nach Hebel auf Geld-Output:
 
 ---
 
-*Dieser Backlog ist lebendig. Wer eine Zeile abarbeitet, traegt Datum und
+_Dieser Backlog ist lebendig. Wer eine Zeile abarbeitet, traegt Datum und
 Resultat hier ein. Issue-Closure ohne Eintrag in diesem Dokument ist
-nicht zulaessig.*
+nicht zulaessig._

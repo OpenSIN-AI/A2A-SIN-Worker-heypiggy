@@ -25,15 +25,15 @@ Consequences:
 
 ## 2. Goals
 
-| # | Goal | Verifiable by |
-|---|------|---------------|
-| G1 | Explicit, versioned Bridge contract | `bridge.contract.version == "1.0.0"` on both sides |
-| G2 | Deterministic runtime state machine | `tests/runtime/test_state_machine.py` |
-| G3 | Evidence for every dispatch | `bridge.evidenceBundle` returns snapshot + screenshot + network + behavior |
-| G4 | Session lifecycle with TTL + LKG | `session.manifest`, `session.lastKnownGood` |
-| G5 | Stealth as a pluggable strategy | `opensin_stealth/strategy.py` with register/select |
-| G6 | Panel plugins load from manifest | `platforms/registry.json` + `panel_overrides.py` |
-| G7 | Validation harness runs in CI | `make validate` green on main |
+| #   | Goal                                | Verifiable by                                                              |
+| --- | ----------------------------------- | -------------------------------------------------------------------------- |
+| G1  | Explicit, versioned Bridge contract | `bridge.contract.version == "1.0.0"` on both sides                         |
+| G2  | Deterministic runtime state machine | `tests/runtime/test_state_machine.py`                                      |
+| G3  | Evidence for every dispatch         | `bridge.evidenceBundle` returns snapshot + screenshot + network + behavior |
+| G4  | Session lifecycle with TTL + LKG    | `session.manifest`, `session.lastKnownGood`                                |
+| G5  | Stealth as a pluggable strategy     | `opensin_stealth/strategy.py` with register/select                         |
+| G6  | Panel plugins load from manifest    | `platforms/registry.json` + `panel_overrides.py`                           |
+| G7  | Validation harness runs in CI       | `make validate` green on main                                              |
 
 ## 3. Non-goals
 

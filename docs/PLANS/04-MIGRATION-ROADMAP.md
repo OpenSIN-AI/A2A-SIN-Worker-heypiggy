@@ -22,16 +22,19 @@ Voraussetzung: `docs/PLANS/03-EARNINGS-PROOF-PIPELINE.md` ToS-/Account-
 Klärung erledigt.
 
 ### Sprint 1.1 — Telemetry-Baseline
+
 - [ ] `scripts/earnings_telemetry.py` baut die 5 Frühindikatoren.
 - [ ] `BUSINESS-STATE.md` als Single Source of Truth für "verdienen wir?".
 - [ ] CI-Job `earnings-telemetry` aktualisiert das File täglich.
 
 ### Sprint 1.2 — Earnings Smoke
+
 - [ ] Manueller `workflow_dispatch`-Job `earnings-smoke`.
 - [ ] Replay-Bundle Artefakt.
 - [ ] DoD: 5 grüne Runs in Folge.
 
 ### Sprint 1.3 — AI Gateway Primary
+
 - [ ] `worker/ai/backend.py` live (nicht Skeleton).
 - [ ] Alle Vision-Calls gehen über `AIGatewayBackend`.
 - [ ] Telemetry pro Call: provider, model, latency, tokens.
@@ -46,16 +49,19 @@ Klärung erledigt.
 Voraussetzung: Phase 1 Phase-Gate.
 
 ### Sprint 2.1 — unmask Client live
+
 - [ ] `worker/integrations/unmask_client.py` als JSON-RPC-Client live.
 - [ ] Compat-Smoke gegen gepinnte unmask-Version.
 - [ ] Alle DOM-/Network-Reads aus dem Monolithen ersetzen.
 
 ### Sprint 2.2 — playstealth Client live
+
 - [ ] `worker/integrations/playstealth_client.py` als Subprocess-Client live.
 - [ ] Compat-Smoke gegen gepinnte playstealth-Version.
 - [ ] Alle Browser-Klicks aus dem Monolithen ersetzen.
 
 ### Sprint 2.3 — Code-Diet
+
 - [ ] `heypiggy_vision_worker.py` schrumpft auf ≤ 3 KLOC.
 - [ ] Tote Module markiert / gelöscht.
 - [ ] CHANGELOG dokumentiert die Migration sauber.
@@ -70,22 +76,26 @@ Smoke-Test bleibt grün.
 Voraussetzung: Phase 2 Phase-Gate.
 
 ### Sprint 3.1 — Pre-existing Test-Fails (Backlog A4)
+
 - [ ] `worker/context.py:147` `VisionState.freeze` TypeError.
 - [ ] `tests/worker/test_cli.py` Bridge-Health-Mock.
 - [ ] `tests/test_config.py` Infisical-Mock.
 - [ ] `tests/worker/test_checkpoints.py` mtime-Test.
 
 ### Sprint 3.2 — Multi-Persona-Pool
+
 - [ ] N Personas, dokumentierte Rotation, Account-Health-Tracking pro
       Persona.
 - [ ] Cooldown nach Disqualify.
 
 ### Sprint 3.3 — Cost & Latency
+
 - [ ] AI-Backend `gpt-oss` für non-vision Tasks.
 - [ ] Vision-Caching (gleiche Frage in 24h → cached answer).
 - [ ] Telemetry: EUR / completed survey.
 
 ### Sprint 3.4 — Optionaler Puter-Fallback
+
 - [ ] Hinter Feature-Flag `AI_BACKEND_FALLBACK=puter`.
 - [ ] Nur für non-vision-critical Tasks.
 - [ ] Klar dokumentiert mit den Risiken aus Plan 02.

@@ -11,6 +11,7 @@
 **Objective:** Eliminate exposed credentials from git history permanently.
 
 **Key Results:**
+
 - KR1: 0 exposed credentials in git history (from `git ls-files .env` → 0)
 - KR2: All leaked keys (HEYPIGGY_PASSWORD, NVIDIA_API_KEY) rotated on provider platforms
 - KR3: Pre-commit hook blocks future `.env` commits with 100% reliability
@@ -22,12 +23,14 @@
 **Strengths:** `.gitignore` already contains `.env` rule (nachträglich). Repo is private.
 
 **Weaknesses:**
+
 - `.env` file is `git ls-files` confirmed tracked
 - Contains: `HEYPIGGY_PASSWORD="ZOE.jerry2024"`, `NVIDIA_API_KEY="NVIDIA_API_KEY (ENTFERNT – nur env var)"`
 - Multiple commits in history contain this file
 - Remote (`github.com/OpenSIN-AI/A2A-SIN-Worker-heypiggy`) has the same history
 
 **Critical Gaps:**
+
 - No pre-commit hook for secret detection installed
 - No `.env.example` populated (currently empty, 0 bytes)
 - Credentials still active on provider platforms
@@ -36,22 +39,22 @@
 
 ## Decisions
 
-| Decision | Rationale | Alternatives | Owner |
-|----------|-----------|-------------|-------|
-| BFG Repo-Cleaner vs git-filter-repo | BFG handles large repos, single command, well-documented | `git filter-branch` (deprecated), `git-filter-repo` (faster) | Security |
-| Rotate ALL exposed keys | Even if history purged, keys existed in plaintext on GitHub servers | Key rotation is mandatory per NIST SP 800-63 | Security |
-| Force-push to main | Rewriting history requires `--force` - coordinate with all collaborators | Squash-rebase (more complex) | DevOps |
-| Install gitleaks pre-commit | Industry standard, CI already has gitleaks workflow | `detect-secrets`, `talisman` | DevOps |
+| Decision                            | Rationale                                                                | Alternatives                                                 | Owner    |
+| ----------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------ | -------- |
+| BFG Repo-Cleaner vs git-filter-repo | BFG handles large repos, single command, well-documented                 | `git filter-branch` (deprecated), `git-filter-repo` (faster) | Security |
+| Rotate ALL exposed keys             | Even if history purged, keys existed in plaintext on GitHub servers      | Key rotation is mandatory per NIST SP 800-63                 | Security |
+| Force-push to main                  | Rewriting history requires `--force` - coordinate with all collaborators | Squash-rebase (more complex)                                 | DevOps   |
+| Install gitleaks pre-commit         | Industry standard, CI already has gitleaks workflow                      | `detect-secrets`, `talisman`                                 | DevOps   |
 
 ---
 
 ## Assumptions
 
-| Assumption | Confidence | Validation Method |
-|------------|-----------|-------------------|
-| No other files contain secrets | 0.85 | `gitleaks detect --no-git -v` full repo scan |
-| Only one developer has local clone | 0.70 | Confirm via team communication |
-| `.env.example` can be populated without secrets | 0.99 | Check current `.env.example` (0 bytes) |
+| Assumption                                      | Confidence | Validation Method                            |
+| ----------------------------------------------- | ---------- | -------------------------------------------- |
+| No other files contain secrets                  | 0.85       | `gitleaks detect --no-git -v` full repo scan |
+| Only one developer has local clone              | 0.70       | Confirm via team communication               |
+| `.env.example` can be populated without secrets | 0.99       | Check current `.env.example` (0 bytes)       |
 
 ---
 
@@ -105,18 +108,19 @@ graph TD
 
 ## Risk Register
 
-| ID | Risk | Likelihood | Impact | Score | Mitigation | Owner |
-|----|------|-----------|--------|-------|------------|-------|
-| R1 | Force-push breaks other developer clones | 0.3 | 8 | 24 | Announce 24h before, coordinate re-clone | DevOps |
-| R2 | Old key still cached on GitHub servers | 0.1 | 10 | 10 | Key rotation (P1) handles this | Security |
-| R3 | BFG fails on complex history | 0.15 | 7 | 10.5 | Fallback to `git-filter-repo` | DevOps |
-| R4 | `.env.example` accidentally gets real values | 0.2 | 9 | 18 | Pre-commit hook blocks any `.env` commit | DevOps |
+| ID  | Risk                                         | Likelihood | Impact | Score | Mitigation                               | Owner    |
+| --- | -------------------------------------------- | ---------- | ------ | ----- | ---------------------------------------- | -------- |
+| R1  | Force-push breaks other developer clones     | 0.3        | 8      | 24    | Announce 24h before, coordinate re-clone | DevOps   |
+| R2  | Old key still cached on GitHub servers       | 0.1        | 10     | 10    | Key rotation (P1) handles this           | Security |
+| R3  | BFG fails on complex history                 | 0.15       | 7      | 10.5  | Fallback to `git-filter-repo`            | DevOps   |
+| R4  | `.env.example` accidentally gets real values | 0.2        | 9      | 18    | Pre-commit hook blocks any `.env` commit | DevOps   |
 
 **Overall Risk Score:** 62.5 → HIGH (proceed only with approved mitigations)
 
 ---
 
 ## Rollback Plan
+
 - **Trigger:** Force-push corrupts remote or team cannot re-clone
 - **Action:** `git push origin +<pre-bfg-sha>:main` (keep backup clone)
 - **Max Loss:** 1-2 hours of developer time for re-clone
@@ -124,6 +128,7 @@ graph TD
 ---
 
 ## Done Criteria
+
 - [ ] `git ls-files .env` returns nothing
 - [ ] All 3 credentials rotated on provider platforms
 - [ ] `.env.example` populated with all required keys (no values)
@@ -134,9 +139,10 @@ graph TD
 ---
 
 ## Approval Gates
+
 - [ ] Security Lead
 - [ ] DevOps Lead
 
 ---
 
-*Plan ID: SOTA-PLAN-001 | Quality Score: 87/100 | Overall Risk: 62.5 (HIGH)*
+_Plan ID: SOTA-PLAN-001 | Quality Score: 87/100 | Overall Risk: 62.5 (HIGH)_

@@ -152,8 +152,10 @@ async def fill_input(page, selector: str, text: str):
 
 async def wait_for_manual_login(page, timeout_seconds: int = 300) -> bool:
     """Wartet auf manuelles Login, bis die URL nicht mehr Login ist."""
-    deadline = asyncio.get_event_loop().time() + timeout_seconds
-    while asyncio.get_event_loop().time() < deadline:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        deadline = loop.time() + timeout_seconds
+        while loop.time() < deadline:
         current_url = (page.url or "").lower()
         if (
             "login" not in current_url and "signin" not in current_url

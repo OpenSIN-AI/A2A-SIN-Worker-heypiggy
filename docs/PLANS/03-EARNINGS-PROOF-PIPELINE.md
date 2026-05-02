@@ -5,6 +5,7 @@
 ## 1. Warum dieser Plan existiert
 
 Aus dem CEO-Audit (`docs/CEO-AUDIT.md`):
+
 > "Es gibt aktuell keine produktive End-to-End-Erfolgsmetrik mit Auszahlung
 > auf heypiggy.com."
 
@@ -24,6 +25,7 @@ sechs Schritte produziert und in einem Artefakt-Bundle einreicht:
 6. (Bonus): Auszahlungs-Schwelle erreicht und Cashout angestoßen.
 
 Bewiesen wird das durch:
+
 - Audit-Log mit `survey_completed` Event (run-id, panel, points, timestamp)
 - Bridge-Trace + DOM-Snapshot vom Complete-Screen
 - API-Response-Diff: `account.balance` vorher vs nachher
@@ -35,14 +37,14 @@ Diese Fragen sind **rechtliche und geschäftliche** Themen, kein Engineering.
 
 ### 3.1 ToS-Klarheit
 
-| Panel / Vermittler | Erlaubt automatisierte Antworten? | Belege |
-|---|---|---|
-| heypiggy.com selbst | ❓ ToS-Auszug nötig | TODO |
-| Cint | ❌ generell verboten ("automated participation") | Cint Quality Policy |
-| Lucid (jetzt Cint) | ❌ | Lucid Marketplace-AGB |
-| Dynata | ❌ | Dynata Panel Code of Conduct |
-| PureSpectrum | ❌ | PureSpectrum Quality |
-| Sapio Research | ❓ B2B fokussiert | TODO |
+| Panel / Vermittler  | Erlaubt automatisierte Antworten?                | Belege                       |
+| ------------------- | ------------------------------------------------ | ---------------------------- |
+| heypiggy.com selbst | ❓ ToS-Auszug nötig                              | TODO                         |
+| Cint                | ❌ generell verboten ("automated participation") | Cint Quality Policy          |
+| Lucid (jetzt Cint)  | ❌                                               | Lucid Marketplace-AGB        |
+| Dynata              | ❌                                               | Dynata Panel Code of Conduct |
+| PureSpectrum        | ❌                                               | PureSpectrum Quality         |
+| Sapio Research      | ❓ B2B fokussiert                                | TODO                         |
 
 **Konsequenz:** Auch wenn heypiggy.com selbst Automation duldet — sobald der
 Worker auf einen Cint/Lucid/Dynata/PureSpectrum-redirect landet, verstößt er
@@ -86,13 +88,13 @@ Wenn nicht: keine Phase 2. Punkt.
 
 Auch ohne erfolgreichen Smoke-Test können wir heute schon messen:
 
-| Indikator | Datenquelle | Aktuell |
-|---|---|---|
-| Surveys gestartet / 24h | `audit.jsonl` `survey_started` | ❓ unbekannt |
-| Surveys completed / 24h | `audit.jsonl` `survey_completed` | ❓ unbekannt — vermutlich 0 |
-| Häufigster Disqualify-Grund | Audit `disq_reason` | ❓ unbekannt |
-| Häufigster Trap-Hit | `trap_detected` | ❓ unbekannt |
-| Vision-Calls / completed survey | Telemetry | ❓ unbekannt |
+| Indikator                       | Datenquelle                      | Aktuell                     |
+| ------------------------------- | -------------------------------- | --------------------------- |
+| Surveys gestartet / 24h         | `audit.jsonl` `survey_started`   | ❓ unbekannt                |
+| Surveys completed / 24h         | `audit.jsonl` `survey_completed` | ❓ unbekannt — vermutlich 0 |
+| Häufigster Disqualify-Grund     | Audit `disq_reason`              | ❓ unbekannt                |
+| Häufigster Trap-Hit             | `trap_detected`                  | ❓ unbekannt                |
+| Vision-Calls / completed survey | Telemetry                        | ❓ unbekannt                |
 
 **Action item:** kleines Script `scripts/earnings_telemetry.py` das diese fünf
 Zahlen aus dem letzten 24h-Audit-Log zusammenzieht und nach `BUSINESS-STATE.md`

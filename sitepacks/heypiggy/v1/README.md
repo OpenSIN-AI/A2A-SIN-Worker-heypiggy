@@ -4,18 +4,18 @@ This sitepack centralizes runtime selectors, flows, and page signatures for `hey
 
 ## Selectors
 
-| Key | Selector |
-| --- | --- |
-| `login_email` | `input[type='email']` |
-| `login_password` | `input[type='password']` |
-| `login_submit` | `button[type='submit']` |
-| `consent_next` | `#submit-button-cpx` |
-| `survey_card` | `div.survey-item` |
-| `survey_card_alt` | `.survey-card` |
-| `survey_clickable` | `[style*='cursor: pointer']` |
-| `primary_buttons` | `button, a, [role='button']` |
-| `survey_submit` | `button[type='submit']` |
-| `captcha_presence` | composite selector for visible captcha surfaces |
+| Key                        | Selector                                            |
+| -------------------------- | --------------------------------------------------- |
+| `login_email`              | `input[type='email']`                               |
+| `login_password`           | `input[type='password']`                            |
+| `login_submit`             | `button[type='submit']`                             |
+| `consent_next`             | `#submit-button-cpx`                                |
+| `survey_card`              | `div.survey-item`                                   |
+| `survey_card_alt`          | `.survey-card`                                      |
+| `survey_clickable`         | `[style*='cursor: pointer']`                        |
+| `primary_buttons`          | `button, a, [role='button']`                        |
+| `survey_submit`            | `button[type='submit']`                             |
+| `captcha_presence`         | composite selector for visible captcha surfaces     |
 | `captcha_checkbox_targets` | composite selector for clickable captcha checkboxes |
 
 ## Verification Notes

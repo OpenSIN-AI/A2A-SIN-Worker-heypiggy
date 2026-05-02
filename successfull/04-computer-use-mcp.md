@@ -7,17 +7,17 @@
 
 ## Ersetzt ALLE unsere alten Tools:
 
-| Aktion | Altes Tool | computer-use-mcp |
-|--------|-----------|------------------|
-| Screenshot | `screencapture -x` | `get_screenshot` → base64 PNG |
-| Maus bewegen | `cliclick m:X,Y` | `mouse_move [x,y]` |
-| Linksklick | `cliclick c:X,Y` | `left_click [x,y]` |
-| Rechtsklick | — | `right_click [x,y]` |
-| Doppelklick | — | `double_click [x,y]` |
-| Text tippen | `osascript keystroke` | `type "text"` |
-| Tastenkombi | `osascript keystroke` | `key "ctrl+c"` |
-| Scrollen | — | `scroll "down:500"` |
-| Cursor-Position | — | `get_cursor_position` |
+| Aktion          | Altes Tool            | computer-use-mcp              |
+| --------------- | --------------------- | ----------------------------- |
+| Screenshot      | `screencapture -x`    | `get_screenshot` → base64 PNG |
+| Maus bewegen    | `cliclick m:X,Y`      | `mouse_move [x,y]`            |
+| Linksklick      | `cliclick c:X,Y`      | `left_click [x,y]`            |
+| Rechtsklick     | —                     | `right_click [x,y]`           |
+| Doppelklick     | —                     | `double_click [x,y]`          |
+| Text tippen     | `osascript keystroke` | `type "text"`                 |
+| Tastenkombi     | `osascript keystroke` | `key "ctrl+c"`                |
+| Scrollen        | —                     | `scroll "down:500"`           |
+| Cursor-Position | —                     | `get_cursor_position`         |
 
 ## Protokoll: MCP (Model Context Protocol)
 

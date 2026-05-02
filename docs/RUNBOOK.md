@@ -8,15 +8,15 @@ ist es weil eine der folgenden Voraussetzungen fehlt — nicht weil das Repo
 
 ## 0. Voraussetzungen
 
-| Was                      | Version  | Pflicht? | Wozu                                  |
-| ------------------------ | -------- | -------- | ------------------------------------- |
-| Python                   | >= 3.11  | ja       | Runtime                               |
-| Chrome / Chromium        | aktuell  | ja       | Bridge-Extension                      |
-| OpenSIN-Bridge Extension | latest   | ja       | DOM/CDP-Steuerung                     |
-| `uv` oder `pip`          | aktuell  | ja       | Dependency-Install                    |
-| NVIDIA NIM API Key       | -        | optional | nur fuer Video/Audio-Analyse          |
-| OpenAI / Opencode        | -        | ja       | Vision-Backend                        |
-| Infisical Account        | -        | optional | wenn `INFISICAL_AUTO_PULL=1`          |
+| Was                      | Version | Pflicht? | Wozu                         |
+| ------------------------ | ------- | -------- | ---------------------------- |
+| Python                   | >= 3.11 | ja       | Runtime                      |
+| Chrome / Chromium        | aktuell | ja       | Bridge-Extension             |
+| OpenSIN-Bridge Extension | latest  | ja       | DOM/CDP-Steuerung            |
+| `uv` oder `pip`          | aktuell | ja       | Dependency-Install           |
+| NVIDIA NIM API Key       | -       | optional | nur fuer Video/Audio-Analyse |
+| OpenAI / Opencode        | -       | ja       | Vision-Backend               |
+| Infisical Account        | -       | optional | wenn `INFISICAL_AUTO_PULL=1` |
 
 ---
 
@@ -120,13 +120,13 @@ der Worker X gemacht?".
 
 ## 7. Haeufige Fehler
 
-| Fehler                                                     | Ursache                              | Loesung                                                   |
-| ---------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------- |
-| `preflight_failed: bridge_unreachable`                     | Bridge-Extension nicht laeuft        | Chrome starten, Extension aktivieren                      |
-| `preflight_failed: vision_auth`                            | Falscher API-Key oder falsches Modell | `.env` pruefen, `heypiggy-worker doctor`                  |
-| `WRONG_LANDING_CASHOUT` Recovery-Loop                       | Login-Redirect zur Cashout-Seite     | Persona-Email pruefen, evtl. Captcha im Browser haengen   |
-| Worker beendet sich sofort mit Exit-Code 2                  | Pflicht-Env nicht gesetzt            | Schritt 2 dieser Datei lesen                              |
-| Vision-Calls timeouten dauerhaft                            | Vision-Backend down                  | Fallback-Backend setzen (`VISION_BACKEND=nvidia`)         |
+| Fehler                                     | Ursache                               | Loesung                                                 |
+| ------------------------------------------ | ------------------------------------- | ------------------------------------------------------- |
+| `preflight_failed: bridge_unreachable`     | Bridge-Extension nicht laeuft         | Chrome starten, Extension aktivieren                    |
+| `preflight_failed: vision_auth`            | Falscher API-Key oder falsches Modell | `.env` pruefen, `heypiggy-worker doctor`                |
+| `WRONG_LANDING_CASHOUT` Recovery-Loop      | Login-Redirect zur Cashout-Seite      | Persona-Email pruefen, evtl. Captcha im Browser haengen |
+| Worker beendet sich sofort mit Exit-Code 2 | Pflicht-Env nicht gesetzt             | Schritt 2 dieser Datei lesen                            |
+| Vision-Calls timeouten dauerhaft           | Vision-Backend down                   | Fallback-Backend setzen (`VISION_BACKEND=nvidia`)       |
 
 ## 8. Troubleshooting-Reihenfolge
 
@@ -141,5 +141,5 @@ Wenn was nicht klappt, in **dieser** Reihenfolge pruefen:
 
 ---
 
-*Wenn dieses Runbook unvollstaendig ist, bitte direkt korrigieren.
-Es ist die einzige Stelle die Ground-Truth fuer Inbetriebnahme sein darf.*
+_Wenn dieses Runbook unvollstaendig ist, bitte direkt korrigieren.
+Es ist die einzige Stelle die Ground-Truth fuer Inbetriebnahme sein darf._

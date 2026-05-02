@@ -22,6 +22,7 @@ pip install -r requirements.txt
 ```
 
 ## Testing
+
 - Run full suite: `python3 -m pytest tests`
 - The project follows a WHY/CONSEQUENCES comment pattern (in German).
 - Every major feature should include focused regression tests.

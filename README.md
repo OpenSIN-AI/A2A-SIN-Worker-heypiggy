@@ -43,17 +43,17 @@ Dieser Worker ist die **visuelle Intelligenz** des OpenSIN-Systems. Er verbindet
 
 ## Kernfeatures
 
-| Feature | Beschreibung |
-|---------|--------------|
-| **Vision-First** | Jede mutierende Aktion (Klick/Type/Navigate) läuft durch einen Vision-LLM-Gate-Call. Es gibt keine blinde DOM-Selektion. |
-| **Exakte Tab-Bindung** | Der Worker kontrolliert genau einen Tab über die OpenSIN-Bridge. Keine Interferenz mit anderen Tabs. |
-| **Panel-aware Routing** | Detektoren für PureSpectrum / Dynata / Sapio / Cint / Lucid + ein Answer-Router (`answer_router.py`) der pro Step Frage-Typ und Antwort-Strategie als Prompt-Block injiziert. |
-| **Answer-History / Anti-Learn** | Fehloptionen werden persistiert (`answer_history.py`) und beim nächsten Schritt vermieden; wiederholte Fallen schalten auf Vision-Review statt Blind-Repeat. |
-| **Attention/Trap-Detection** | Heuristiken für Attention-Checks, Konsistenz-Traps, Mindestlängen, Quota-/Disqualifikations-Banner. |
-| **Multi-Modal** | Audio-/Video-/Bild-Fragen werden über Media-Router transkribiert/beschrieben und ins Vision-Prompt eingespeist. |
-| **Self-Healing** | Bridge-Retries, Recovery-Pfade und ein Fail-Replay-Recorder; Recovery routet **nicht** auf Cashout/Giftcard (siehe Issue #84). |
-| **Fail-Closed Preflight** | Der Worker startet keine Tab-Mutation, wenn Vision-Auth oder Pflicht-Env fehlt. `SKIP_PREFLIGHT=1` ist nur in `WORKER_ENV=development/test/ci` oder mit `WORKER_ALLOW_PREFLIGHT_SKIP=1` wirksam (siehe Issue #85). |
-| **Audit-Trail** | Append-only JSONL Audit-Log, strukturierte Logs mit Run-ID-Korrelation, Secret-Redaction. |
+| Feature                         | Beschreibung                                                                                                                                                                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Vision-First**                | Jede mutierende Aktion (Klick/Type/Navigate) läuft durch einen Vision-LLM-Gate-Call. Es gibt keine blinde DOM-Selektion.                                                                                           |
+| **Exakte Tab-Bindung**          | Der Worker kontrolliert genau einen Tab über die OpenSIN-Bridge. Keine Interferenz mit anderen Tabs.                                                                                                               |
+| **Panel-aware Routing**         | Detektoren für PureSpectrum / Dynata / Sapio / Cint / Lucid + ein Answer-Router (`answer_router.py`) der pro Step Frage-Typ und Antwort-Strategie als Prompt-Block injiziert.                                      |
+| **Answer-History / Anti-Learn** | Fehloptionen werden persistiert (`answer_history.py`) und beim nächsten Schritt vermieden; wiederholte Fallen schalten auf Vision-Review statt Blind-Repeat.                                                       |
+| **Attention/Trap-Detection**    | Heuristiken für Attention-Checks, Konsistenz-Traps, Mindestlängen, Quota-/Disqualifikations-Banner.                                                                                                                |
+| **Multi-Modal**                 | Audio-/Video-/Bild-Fragen werden über Media-Router transkribiert/beschrieben und ins Vision-Prompt eingespeist.                                                                                                    |
+| **Self-Healing**                | Bridge-Retries, Recovery-Pfade und ein Fail-Replay-Recorder; Recovery routet **nicht** auf Cashout/Giftcard (siehe Issue #84).                                                                                     |
+| **Fail-Closed Preflight**       | Der Worker startet keine Tab-Mutation, wenn Vision-Auth oder Pflicht-Env fehlt. `SKIP_PREFLIGHT=1` ist nur in `WORKER_ENV=development/test/ci` oder mit `WORKER_ALLOW_PREFLIGHT_SKIP=1` wirksam (siehe Issue #85). |
+| **Audit-Trail**                 | Append-only JSONL Audit-Log, strukturierte Logs mit Run-ID-Korrelation, Secret-Redaction.                                                                                                                          |
 
 ## 📦 Installation
 
@@ -124,16 +124,16 @@ docker-compose up -d
 
 Wichtige Umgebungsvariablen:
 
-| Variable | Beschreibung | Beispiel |
-|----------|--------------|----------|
-| `NVIDIA_API_KEY` | NVIDIA NIM API Key | `nvapi-...` |
-| `VISION_BACKEND` | Backend Auswahl | `auto`, `nvidia` |
-| `BRIDGE_MCP_URL` | HTTP URL zur Bridge | `https://.../mcp` |
-| `BRIDGE_HEALTH_URL` | Health-Endpoint der Bridge | `https://.../health` |
-| `BRIDGE_ADAPTER` | Bridge-Modus (`legacy`/`opensin`) | `opensin` |
-| `OPENSIN_BRIDGE_V2` | Opt-in Alias für V2-Adapter | `1` |
-| `INFISICAL_AUTO_PULL` | Canonical Secrets automatisch laden | `1` |
-| `PERSONA_FILE` | Pfad zur Persona-Datei | `profiles/jeremy.json` |
+| Variable              | Beschreibung                        | Beispiel               |
+| --------------------- | ----------------------------------- | ---------------------- |
+| `NVIDIA_API_KEY`      | NVIDIA NIM API Key                  | `nvapi-...`            |
+| `VISION_BACKEND`      | Backend Auswahl                     | `auto`, `nvidia`       |
+| `BRIDGE_MCP_URL`      | HTTP URL zur Bridge                 | `https://.../mcp`      |
+| `BRIDGE_HEALTH_URL`   | Health-Endpoint der Bridge          | `https://.../health`   |
+| `BRIDGE_ADAPTER`      | Bridge-Modus (`legacy`/`opensin`)   | `opensin`              |
+| `OPENSIN_BRIDGE_V2`   | Opt-in Alias für V2-Adapter         | `1`                    |
+| `INFISICAL_AUTO_PULL` | Canonical Secrets automatisch laden | `1`                    |
+| `PERSONA_FILE`        | Pfad zur Persona-Datei              | `profiles/jeremy.json` |
 
 ## 🧪 Tests
 

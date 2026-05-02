@@ -5,12 +5,12 @@
 
 ## 1. Wer macht was
 
-| Frage | Wer antwortet |
-|---|---|
-| "Was ist auf der Seite?" | **unmask-cli** via JSON-RPC: DOM scan, network, console, selfHeal Selektoren, optional `act/extract/observe`. |
+| Frage                                               | Wer antwortet                                                                                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| "Was ist auf der Seite?"                            | **unmask-cli** via JSON-RPC: DOM scan, network, console, selfHeal Selektoren, optional `act/extract/observe`.                   |
 | "Wie klicke ich, ohne dass das Panel mich erkennt?" | **playstealth-cli** als Python-Subprocess: `click-survey`, `answer-survey`, human-input Rhythmen, Persona-Bindung, Anti-Detect. |
-| "Welche Antwort gebe ich?" | **dieser Worker** über `answer_router.py` + `panel_overrides.py` + `persona.py`. |
-| "Habe ich verdient? Wann auszahlen?" | **dieser Worker** via `survey_orchestrator.py` + heypiggy-API. |
+| "Welche Antwort gebe ich?"                          | **dieser Worker** über `answer_router.py` + `panel_overrides.py` + `persona.py`.                                                |
+| "Habe ich verdient? Wann auszahlen?"                | **dieser Worker** via `survey_orchestrator.py` + heypiggy-API.                                                                  |
 
 Der Worker macht NIE selbst einen Playwright-Aufruf. Wenn er es heute tut, ist
 das Migrations-Schuld und gehört auf einen der zwei CLIs umgeleitet.
@@ -37,6 +37,7 @@ unmask serve            # stdio default
 ```
 
 Schreiblücken (TODO an unmask):
+
 - klare semver-Versionierung der RPC-Surface (siehe Issue-Vorlage **U-1**).
 - ein RPC-Methoden-Dump per `--dump-rpc-schema` (Issue **U-2**) damit unser
   Python-Client typed gegen ein JSON-Schema-File bauen kann.
@@ -62,6 +63,7 @@ Stdout: kompakter Status. Artefakte: per `PLAYSTEALTH_ARTIFACTS_DIR`. State:
 per `PLAYSTEALTH_STATE_PATH` als atomic JSON.
 
 Schreiblücken (TODO an playstealth):
+
 - ein einheitliches `--json` Flag pro Befehl (Issue **P-1**) damit der Worker
   nicht stdout parsen muss.
 - Exit-Code-Konvention: 0 = ok, 64 = soft-fail (resumable), 65 = hard-fail
@@ -115,12 +117,12 @@ verklebt. Phase 2 zerschneidet sie an genau diesen Stellen.
 
 ## 5. Risiken und wie wir sie absichern
 
-| Risiko | Gegenmaßnahme |
-|---|---|
-| unmask RPC-Surface ändert sich silently | Wir pinnen unmask auf eine Version (`requirements.txt` oder `package.json` für die JS-Brücke) und haben einen Smoke-Test der bei jedem CI-Run `unmask doctor` + `unmask serve --dump-rpc-schema` ausführt und gegen ein eingecheckes Schema diff't. |
-| playstealth CLI-Output bricht | `--json`-Flag erzwingen (Issue **P-1**) sobald playstealth es anbietet. Bis dahin: schmaler stdout-Parser mit Snapshot-Tests gegen festgelegte Output-Versionen. |
-| Zwei Browser-Instanzen (unmask startet seinen, playstealth seinen) | **Bewusste Trennung in Phase 2.** Phase 3 fusioniert auf einen geteilten CDP-Endpoint. Bis dahin nehmen wir den Overhead in Kauf — Korrektheit > Performance. |
-| Versionsdrift zwischen den drei Repos | Ein gemeinsames `compatibility.json` in diesem Repo das die getesteten Versionen pinnt. CI cached `unmask --version` und `playstealth --version` und failt bei Drift. |
+| Risiko                                                             | Gegenmaßnahme                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| unmask RPC-Surface ändert sich silently                            | Wir pinnen unmask auf eine Version (`requirements.txt` oder `package.json` für die JS-Brücke) und haben einen Smoke-Test der bei jedem CI-Run `unmask doctor` + `unmask serve --dump-rpc-schema` ausführt und gegen ein eingecheckes Schema diff't. |
+| playstealth CLI-Output bricht                                      | `--json`-Flag erzwingen (Issue **P-1**) sobald playstealth es anbietet. Bis dahin: schmaler stdout-Parser mit Snapshot-Tests gegen festgelegte Output-Versionen.                                                                                    |
+| Zwei Browser-Instanzen (unmask startet seinen, playstealth seinen) | **Bewusste Trennung in Phase 2.** Phase 3 fusioniert auf einen geteilten CDP-Endpoint. Bis dahin nehmen wir den Overhead in Kauf — Korrektheit > Performance.                                                                                       |
+| Versionsdrift zwischen den drei Repos                              | Ein gemeinsames `compatibility.json` in diesem Repo das die getesteten Versionen pinnt. CI cached `unmask --version` und `playstealth --version` und failt bei Drift.                                                                               |
 
 ## 6. Definition of Done für die Integration
 

@@ -11,6 +11,7 @@
 **Objective:** Produce the first reproducible pipeline from heypiggy.com login to EUR payout.
 
 **Key Results:**
+
 - KR1: 3 consecutive runs with EUR > 0 payout
 - KR2: Average EUR/h ≥ €1.00 (after Vision-free fast path optimization)
 - KR3: Canary artifact directory contains all screenshots + audit logs per run
@@ -20,6 +21,7 @@
 ## Current State
 
 **Strengths:**
+
 - Vision-free fast path implemented (stealth-runner `b1eee1e` + A2A `35a76f0`)
 - Answer-router with confidence gating
 - Answer-history persistent storage
@@ -28,6 +30,7 @@
 - SIP deaktiviert → unsigned binaries laufen, SkyLight.framework direkt nutzbar
 
 **Weaknesses:**
+
 - 0 EUR ever earned
 - No automated canary setup
 - No structured failure classification per run
@@ -35,6 +38,7 @@
 - Single account, single IP = quick detection risk
 
 **Critical Gaps:**
+
 - No canary script that runs daily
 - No KPI dashboard for EUR/h tracking
 - No automated Screenshot-to-Failure triage
@@ -45,23 +49,23 @@
 
 ## Decisions
 
-| Decision | Rationale | Alternatives | Owner |
-|----------|-----------|-------------|-------|
-| Canary runs via `stealth-runner` NOT `heypiggy_vision_worker.py` | stealth-runner has Vision-free path and screen-follow integration | Direct monolith call (heavy, expensive) | Engineering |
-| Start with VISION_FREE_PATH=1 (enabled) | Maximize profitability from first run | Run with Vision first (slower, more expensive) | Engineering |
-| 1 canary run/day until 3 consecutive EUR > 0 | Conservative, limits detection risk | Multiple runs/day (higher risk, faster feedback) | Product |
-| Store all canary evidence in `/tmp/heypiggy-canary/{date}/` | Structured artifact collection for debugging | No storage (can't debug failures) | Engineering |
+| Decision                                                         | Rationale                                                         | Alternatives                                     | Owner       |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------ | ----------- |
+| Canary runs via `stealth-runner` NOT `heypiggy_vision_worker.py` | stealth-runner has Vision-free path and screen-follow integration | Direct monolith call (heavy, expensive)          | Engineering |
+| Start with VISION_FREE_PATH=1 (enabled)                          | Maximize profitability from first run                             | Run with Vision first (slower, more expensive)   | Engineering |
+| 1 canary run/day until 3 consecutive EUR > 0                     | Conservative, limits detection risk                               | Multiple runs/day (higher risk, faster feedback) | Product     |
+| Store all canary evidence in `/tmp/heypiggy-canary/{date}/`      | Structured artifact collection for debugging                      | No storage (can't debug failures)                | Engineering |
 
 ---
 
 ## Assumptions
 
-| Assumption | Confidence | Validation Method |
-|------------|-----------|-------------------|
-| Vision-free path hits ≥60% confidence on real surveys | 0.55 | Actual confidence scores from canary runs |
-| One account with current credentials still works | 0.70 | Pre-run login test |
-| Surveys with EUR ≥ €0.50 exist and are accessible | 0.60 | Dashboard scan before each canary |
-| Chrome with accessibility enabled runs without crash | 0.90 | AXPress has been stable in testing |
+| Assumption                                            | Confidence | Validation Method                         |
+| ----------------------------------------------------- | ---------- | ----------------------------------------- |
+| Vision-free path hits ≥60% confidence on real surveys | 0.55       | Actual confidence scores from canary runs |
+| One account with current credentials still works      | 0.70       | Pre-run login test                        |
+| Surveys with EUR ≥ €0.50 exist and are accessible     | 0.60       | Dashboard scan before each canary         |
+| Chrome with accessibility enabled runs without crash  | 0.90       | AXPress has been stable in testing        |
 
 ---
 
@@ -111,18 +115,19 @@ graph TD
 
 ## Risk Register
 
-| ID | Risk | Likelihood | Impact | Score | Mitigation | Owner |
-|----|------|-----------|--------|-------|------------|-------|
-| R1 | Credentials invalid after rotation test | 0.2 | 10 | 20 | Rotate only one key at a time, test each | Security |
-| R2 | heypiggy.com blocks single-IP bot within 3 runs | 0.6 | 9 | 54 | VPN rotation, human delays, SOTA-PLAN-007 | Product |
-| R3 | No surveys available with EUR > 0 | 0.4 | 8 | 32 | Test multiple times of day, different weekdays | Product |
-| R4 | Vision-free path has false positives (wrong click) | 0.3 | 7 | 21 | Confidence threshold can be raised per audit | Engineering |
+| ID  | Risk                                               | Likelihood | Impact | Score | Mitigation                                     | Owner       |
+| --- | -------------------------------------------------- | ---------- | ------ | ----- | ---------------------------------------------- | ----------- |
+| R1  | Credentials invalid after rotation test            | 0.2        | 10     | 20    | Rotate only one key at a time, test each       | Security    |
+| R2  | heypiggy.com blocks single-IP bot within 3 runs    | 0.6        | 9      | 54    | VPN rotation, human delays, SOTA-PLAN-007      | Product     |
+| R3  | No surveys available with EUR > 0                  | 0.4        | 8      | 32    | Test multiple times of day, different weekdays | Product     |
+| R4  | Vision-free path has false positives (wrong click) | 0.3        | 7      | 21    | Confidence threshold can be raised per audit   | Engineering |
 
 **Overall Risk Score:** 127 → BLOCKER (mitigate R2 and R3 first)
 
 ---
 
 ## Rollback Plan
+
 - **Trigger:** 3 consecutive runs fail with same error class
 - **Action:** Check fail classification table, fix top error class, restart canary
 - **Max Loss:** 3 days of canary runs, no revenue
@@ -130,6 +135,7 @@ graph TD
 ---
 
 ## Done Criteria
+
 - [ ] 3 consecutive runs with EUR > 0 payout
 - [ ] Average Vision-free hit rate ≥ 60%
 - [ ] `scripts/canary_runner.py` works (single command, cron-safe)
@@ -139,9 +145,10 @@ graph TD
 ---
 
 ## Approval Gates
+
 - [ ] Product Manager
 - [ ] Engineering Lead
 
 ---
 
-*Plan ID: SOTA-PLAN-006 | Quality Score: 85/100 | Overall Risk: 127 (BLOCKER → mitigate R2, R3 first)*
+_Plan ID: SOTA-PLAN-006 | Quality Score: 85/100 | Overall Risk: 127 (BLOCKER → mitigate R2, R3 first)_

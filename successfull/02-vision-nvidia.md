@@ -1,6 +1,7 @@
 # CMD 02: NVIDIA Vision (schnell — 512px Bild)
 
 **Befehl (Shell one-liner):**
+
 ```bash
 screencapture -x /tmp/step.png && sips -Z 512 /tmp/step.png --out /tmp/step_s.png && IMG=$(base64 -i /tmp/step_s.png) && curl -s --max-time 30 https://integrate.api.nvidia.com/v1/chat/completions \
   -H "Authorization: Bearer nvapi-YOUR_KEY" \
@@ -13,6 +14,7 @@ screencapture -x /tmp/step.png && sips -Z 512 /tmp/step.png --out /tmp/step_s.pn
 **Wichtig:** Immer auf 512px verkleinern! 1920px-Fullscreen = 500KB+ = 45s Timeout.
 
 **Prompt für Survey-Koordinaten:**
+
 ```
 Find center pixel coords of first survey button. Answer ONLY: X=NUM Y=NUM
 ```
@@ -20,6 +22,7 @@ Find center pixel coords of first survey button. Answer ONLY: X=NUM Y=NUM
 **Abhängigkeiten:** NVIDIA_API_KEY (nvapi-...), curl, sips (macOS)
 
 **Modelle (Stand 28.4.2026):**
+
 - ✅ `meta/llama-3.2-11b-vision-instruct` — FREE, ~1s, 11B
 - ✅ `meta/**nvidia/nemotron-3-nano-omni-30b-a3b-reasoning**` — FREE, langsamer, 90B
 - ❌ Phi-3.5-vision — EOL 15.4.2026

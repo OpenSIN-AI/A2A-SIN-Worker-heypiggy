@@ -23,25 +23,25 @@ Aus den offiziellen Docs (`docs.puter.com`, abgerufen 2026-04-28):
   das LLM-Calls von einer **Browser-Session des Endbenutzers** an
   Drittanbieter (OpenAI, Anthropic, Google, xAI, Mistral, DeepSeek, OpenRouter)
   proxied.
-- Geschäftsmodell: **"User-Pays Model"** — *jeder Endbenutzer zahlt seine
-  eigenen AI-Kosten über sein Puter.com-Konto*. Zitat aus `docs.puter.com/user-pays-model/`:
+- Geschäftsmodell: **"User-Pays Model"** — _jeder Endbenutzer zahlt seine
+  eigenen AI-Kosten über sein Puter.com-Konto_. Zitat aus `docs.puter.com/user-pays-model/`:
   > "Your users cover their own cloud and AI usage."
 - Authentifizierung läuft über `puter.auth.signIn()` — also über einen
   Browser-Popup mit Endbenutzer-Interaktion.
 - Es gibt seit 2026 einen "Node.js Workers" Pfad — aber auch der setzt einen
-  *signed-in Puter user* voraus.
+  _signed-in Puter user_ voraus.
 
 ## 4. Warum Puter im Headless-Earnings-Worker scheitert
 
-| Problem | Konsequenz |
-|---|---|
-| **Kein interaktiver End-User** | Unser Worker läuft headless ohne Mensch. Es gibt niemanden der "seine eigenen AI-Kosten zahlt". Wir müssten *einen* Puter-Account dauerhaft authentifiziert halten — der dann auch unsere Rechnung zahlt. Das ist nicht "kostenlos und unendlich", das ist **ein Account mit fragiler Auth-Session**. |
-| **Latenz** | Puter ist ein Proxy: `Worker → Puter-Edge → Vendor → Puter-Edge → Worker`. Das ist NICHT schneller als ein direkter Vendor-Call. Puter wirbt nirgends mit Sub-Sekunden-Latenz. Bei einem Vision-Call der pro Step >1s kostet, ist jeder zusätzliche Hop spürbar. |
-| **Auth-Drift mid-session** | Puter-Session läuft über ein Cookie / Token mit unbekannter TTL. Wenn die Session während eines Survey-Runs ausläuft, bricht der Run mitten drin ab. Das ist exakt der "halbherzig"-Failmode den wir vermeiden wollen. |
-| **ToS-Risiko** | Puter behält sich vor "Anti-Abuse"-Maßnahmen. Ein Worker der pro Tag tausende Vision-Calls über *einen* Account fährt sieht aus wie Abuse — auch wenn er es nicht ist. Account-Sperre = Worker offline. |
-| **Audit-Trail** | Unser Worker loggt pro Vision-Call: Provider, Model, Latency, Token-Usage, Run-ID. Über Puter geht Token-Usage und Vendor-ID nicht zuverlässig zurück. Wir verlieren die Hälfte unserer Operations-Telemetry. |
-| **Vendor-Lock-In** | Mit Puter committen wir uns auf **Puter** — nicht auf einen LLM-Vendor. Wenn Puter morgen Pricing einführt oder pivoted, sind alle unsere Calls plötzlich teuer oder weg. |
-| **Ki-Modell-Auswahl** | Puter wirbt mit "500+ Models". Realistisch sind das die gleichen Modelle die direkt verfügbar sind, mit zusätzlichem Hop. Es gibt **kein** Vision-Modell auf Puter das nicht auch direkt erhältlich ist. |
+| Problem                        | Konsequenz                                                                                                                                                                                                                                                                                            |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Kein interaktiver End-User** | Unser Worker läuft headless ohne Mensch. Es gibt niemanden der "seine eigenen AI-Kosten zahlt". Wir müssten _einen_ Puter-Account dauerhaft authentifiziert halten — der dann auch unsere Rechnung zahlt. Das ist nicht "kostenlos und unendlich", das ist **ein Account mit fragiler Auth-Session**. |
+| **Latenz**                     | Puter ist ein Proxy: `Worker → Puter-Edge → Vendor → Puter-Edge → Worker`. Das ist NICHT schneller als ein direkter Vendor-Call. Puter wirbt nirgends mit Sub-Sekunden-Latenz. Bei einem Vision-Call der pro Step >1s kostet, ist jeder zusätzliche Hop spürbar.                                      |
+| **Auth-Drift mid-session**     | Puter-Session läuft über ein Cookie / Token mit unbekannter TTL. Wenn die Session während eines Survey-Runs ausläuft, bricht der Run mitten drin ab. Das ist exakt der "halbherzig"-Failmode den wir vermeiden wollen.                                                                                |
+| **ToS-Risiko**                 | Puter behält sich vor "Anti-Abuse"-Maßnahmen. Ein Worker der pro Tag tausende Vision-Calls über _einen_ Account fährt sieht aus wie Abuse — auch wenn er es nicht ist. Account-Sperre = Worker offline.                                                                                               |
+| **Audit-Trail**                | Unser Worker loggt pro Vision-Call: Provider, Model, Latency, Token-Usage, Run-ID. Über Puter geht Token-Usage und Vendor-ID nicht zuverlässig zurück. Wir verlieren die Hälfte unserer Operations-Telemetry.                                                                                         |
+| **Vendor-Lock-In**             | Mit Puter committen wir uns auf **Puter** — nicht auf einen LLM-Vendor. Wenn Puter morgen Pricing einführt oder pivoted, sind alle unsere Calls plötzlich teuer oder weg.                                                                                                                             |
+| **Ki-Modell-Auswahl**          | Puter wirbt mit "500+ Models". Realistisch sind das die gleichen Modelle die direkt verfügbar sind, mit zusätzlichem Hop. Es gibt **kein** Vision-Modell auf Puter das nicht auch direkt erhältlich ist.                                                                                              |
 
 ## 5. Was wir stattdessen nehmen — und warum
 
@@ -49,15 +49,15 @@ Aus den offiziellen Docs (`docs.puter.com`, abgerufen 2026-04-28):
 
 Quelle: `vercel.com/ai-gateway`, AI-SDK 6 Doku (`sdk.vercel.ai`).
 
-| Feature | Status |
-|---|---|
-| Single API-Key, alle großen Vendors (OpenAI, Anthropic, Google Vertex, AWS Bedrock, Fireworks) | ✅ zero config |
-| Vision-Modelle (multimodal) | ✅ alle relevanten — `openai/gpt-5-mini`, `anthropic/claude-opus-4.6`, `google/gemini-3-flash` |
-| Native Vercel-Integration | ✅ — wir laufen ohnehin auf Vercel |
-| Caching, Rate-Limit-Kontrolle, Logs | ✅ in der Plattform |
-| Failover zwischen Vendors | ✅ |
-| Streaming, Function-Calling, Image-In | ✅ |
-| Audit-Trail (Token-Usage, Latency, Vendor) | ✅ pro Call |
+| Feature                                                                                        | Status                                                                                         |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Single API-Key, alle großen Vendors (OpenAI, Anthropic, Google Vertex, AWS Bedrock, Fireworks) | ✅ zero config                                                                                 |
+| Vision-Modelle (multimodal)                                                                    | ✅ alle relevanten — `openai/gpt-5-mini`, `anthropic/claude-opus-4.6`, `google/gemini-3-flash` |
+| Native Vercel-Integration                                                                      | ✅ — wir laufen ohnehin auf Vercel                                                             |
+| Caching, Rate-Limit-Kontrolle, Logs                                                            | ✅ in der Plattform                                                                            |
+| Failover zwischen Vendors                                                                      | ✅                                                                                             |
+| Streaming, Function-Calling, Image-In                                                          | ✅                                                                                             |
+| Audit-Trail (Token-Usage, Latency, Vendor)                                                     | ✅ pro Call                                                                                    |
 
 Kosten: pay-as-you-go pro Vendor, Free-Tier-Quotas existieren. Genau das was
 ein professioneller Earnings-Worker braucht.
@@ -71,6 +71,7 @@ großen Modell.
 ### 5.3 Optionaler Fallback: **Puter** (hinter einem Feature-Flag)
 
 Sinnvoll genau dann wenn:
+
 - Wir eine **HeyPiggy-Webview** für menschliche Nutzer bauen (dann zahlt der
   Mensch wirklich seine eigene AI-Nutzung — Puter passt perfekt).
 - Wir AI Gateway Free-Tier-Quota für non-critical Tasks (z.B. Trap-

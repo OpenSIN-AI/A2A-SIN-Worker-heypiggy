@@ -11,6 +11,7 @@
 **Objective:** Establish minimum 20 unit tests for screen-follow (4.247 LOC Swift with 0 tests).
 
 **Key Results:**
+
 - KR1: Test count from 0 → 20+ (20 unit tests minimum)
 - KR2: All CI workflows (`swift test`) pass
 - KR3: Coverage ≥ 40% on `Sources/` (from 0%)
@@ -24,6 +25,7 @@
 **Weaknesses:** 0 test functions. 0% coverage. No XCTest infrastructure beyond stub file. No mock framework.
 
 **Critical Gaps:**
+
 - `Tests/SkylightCliTests/SmokeTests.swift` exists but is from skylight-cli (wrong repo reference)
 - No `XCTestCase` subclasses anywhere
 - JSONL audit trail has no test
@@ -34,21 +36,21 @@
 
 ## Decisions
 
-| Decision | Rationale | Alternatives | Owner |
-|----------|-----------|-------------|-------|
-| XCTest framework (built-in) | Zero dependencies, Xcode/SPM native | Quick/Nimble (adds complexity) | iOS |
-| Test RecordingManager first | Most critical component (recording state) | Test GUI first (harder, requires UI testing) | iOS |
-| Mock via protocol abstractions | Swift doesn't have runtime mocking built-in | Cuckoo, SwiftyMocky (add build complexity) | iOS |
+| Decision                       | Rationale                                   | Alternatives                                 | Owner |
+| ------------------------------ | ------------------------------------------- | -------------------------------------------- | ----- |
+| XCTest framework (built-in)    | Zero dependencies, Xcode/SPM native         | Quick/Nimble (adds complexity)               | iOS   |
+| Test RecordingManager first    | Most critical component (recording state)   | Test GUI first (harder, requires UI testing) | iOS   |
+| Mock via protocol abstractions | Swift doesn't have runtime mocking built-in | Cuckoo, SwiftyMocky (add build complexity)   | iOS   |
 
 ---
 
 ## Assumptions
 
-| Assumption | Confidence | Validation Method |
-|------------|-----------|-------------------|
-| ScreenCaptureKit works in test without hardware | 0.60 | `swift test` in CI (macOS runner required) |
-| `Combine` publishers are testable with expectations | 0.95 | Existing Combine patterns |
-| JSONL parsing can be tested without file I/O | 0.90 | In-memory string tests |
+| Assumption                                          | Confidence | Validation Method                          |
+| --------------------------------------------------- | ---------- | ------------------------------------------ |
+| ScreenCaptureKit works in test without hardware     | 0.60       | `swift test` in CI (macOS runner required) |
+| `Combine` publishers are testable with expectations | 0.95       | Existing Combine patterns                  |
+| JSONL parsing can be tested without file I/O        | 0.90       | In-memory string tests                     |
 
 ---
 
@@ -91,17 +93,18 @@ graph TD
 
 ## Risk Register
 
-| ID | Risk | Likelihood | Impact | Score | Mitigation | Owner |
-|----|------|-----------|--------|-------|------------|-------|
-| R1 | ScreenCaptureKit unavailable in CI | 0.5 | 6 | 30 | Use macOS runner, skip video tests in CI | iOS |
-| R2 | Lock-file tests create real files | 0.3 | 4 | 12 | Use temp directory, cleanup in tearDown | iOS |
-| R3 | Combine async timing breaks tests | 0.2 | 5 | 10 | Use XCTestExpectation with 5s timeout | iOS |
+| ID  | Risk                               | Likelihood | Impact | Score | Mitigation                               | Owner |
+| --- | ---------------------------------- | ---------- | ------ | ----- | ---------------------------------------- | ----- |
+| R1  | ScreenCaptureKit unavailable in CI | 0.5        | 6      | 30    | Use macOS runner, skip video tests in CI | iOS   |
+| R2  | Lock-file tests create real files  | 0.3        | 4      | 12    | Use temp directory, cleanup in tearDown  | iOS   |
+| R3  | Combine async timing breaks tests  | 0.2        | 5      | 10    | Use XCTestExpectation with 5s timeout    | iOS   |
 
 **Overall Risk Score:** 52 → HIGH (mitigate R1 first)
 
 ---
 
 ## Rollback Plan
+
 - **Trigger:** CI can't run any test due to macOS dependency
 - **Action:** Mark ScreenCaptureKit-dependent tests with `#if os(macOS)`, gate CI on macOS runner
 - **Max Loss:** P1 infrastructure time (1-3h)
@@ -109,6 +112,7 @@ graph TD
 ---
 
 ## Done Criteria
+
 - [ ] `swift test` passes with 20+ test functions green
 - [ ] Code coverage ≥ 40%
 - [ ] At least one `XCTestExpectation` async test
@@ -118,9 +122,10 @@ graph TD
 ---
 
 ## Approval Gates
+
 - [ ] iOS/Swift Lead
 - [ ] CI/DevOps Lead
 
 ---
 
-*Plan ID: SOTA-PLAN-003 | Quality Score: 78/100 | Overall Risk: 52 (HIGH)*
+_Plan ID: SOTA-PLAN-003 | Quality Score: 78/100 | Overall Risk: 52 (HIGH)_
